@@ -9,3 +9,9 @@ variable "project" {
   type        = string
   default     = "unicorn-mcp"
 }
+
+variable "enable_cognito_auth" {
+  description = "Enable Cognito JWT authentication on the AgentCore Runtime"
+  type        = bool
+  default     = true
+}
