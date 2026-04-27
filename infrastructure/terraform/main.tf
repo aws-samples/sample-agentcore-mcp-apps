@@ -211,10 +211,13 @@ resource "aws_bedrockagentcore_agent_runtime" "mcp_server" {
     WIDGET_BASE_URL = "https://${aws_cloudfront_distribution.widgets.domain_name}"
   }
 
-  authorizer_configuration {
-    custom_jwt_authorizer {
-      discovery_url    = "https://cognito-idp.${var.region}.amazonaws.com/${aws_cognito_user_pool.mcp.id}/.well-known/openid-configuration"
-      allowed_audience = [aws_cognito_user_pool_client.mcp.id]
+  dynamic "authorizer_configuration" {
+    for_each = var.enable_cognito_auth ? [1] : []
+    content {
+      custom_jwt_authorizer {
+        discovery_url    = "https://cognito-idp.${var.region}.amazonaws.com/${aws_cognito_user_pool.mcp.id}/.well-known/openid-configuration"
+        allowed_audience = [aws_cognito_user_pool_client.mcp.id]
+      }
     }
   }
 }
