@@ -1,0 +1,3 @@
+# Copy this file to terraform.tfvars and update values
+region  = "us-east-1"
+project = "unicorn-mcp"
