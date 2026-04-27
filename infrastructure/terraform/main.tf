@@ -158,15 +158,15 @@ resource "aws_cognito_user_pool" "mcp" {
 }
 
 resource "aws_cognito_user_pool_client" "mcp" {
-  depends_on                               = [aws_cognito_resource_server.mcp]
-  name                                     = "${var.project}-client"
-  user_pool_id                             = aws_cognito_user_pool.mcp.id
-  generate_secret                          = true
-  allowed_oauth_flows                      = ["client_credentials"]
-  allowed_oauth_flows_user_pool_client     = true
-  allowed_oauth_scopes                     = ["${var.project}/invoke"]
-  explicit_auth_flows                      = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-  supported_identity_providers             = ["COGNITO"]
+  depends_on                           = [aws_cognito_resource_server.mcp]
+  name                                 = "${var.project}-client"
+  user_pool_id                         = aws_cognito_user_pool.mcp.id
+  generate_secret                      = true
+  allowed_oauth_flows                  = ["client_credentials"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_scopes                 = ["${var.project}/invoke"]
+  explicit_auth_flows                  = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+  supported_identity_providers         = ["COGNITO"]
 }
 
 resource "aws_cognito_resource_server" "mcp" {
@@ -323,10 +323,10 @@ resource "aws_api_gateway_method" "options" {
 }
 
 resource "aws_api_gateway_integration" "options" {
-  rest_api_id = aws_api_gateway_rest_api.mcp.id
-  resource_id = aws_api_gateway_resource.mcp.id
-  http_method = aws_api_gateway_method.options.http_method
-  type        = "MOCK"
+  rest_api_id       = aws_api_gateway_rest_api.mcp.id
+  resource_id       = aws_api_gateway_resource.mcp.id
+  http_method       = aws_api_gateway_method.options.http_method
+  type              = "MOCK"
   request_templates = { "application/json" = "{\"statusCode\": 200}" }
 }
 
