@@ -1,2 +1,41 @@
-# Ignore the `build/` directory in the package root.
-/build
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+*.js.map
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# CDK
+cdk.out/
+cdk.context.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AWS
+.aws-sam/
+lambda.zip
+
+# Build
+*.zip
