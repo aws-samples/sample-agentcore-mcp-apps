@@ -78,7 +78,21 @@ python scripts/test-runtime.py us-east-1 <runtime-arn>
 
 ### 5. Connect to ChatGPT
 
-See [ChatGPT Setup Guide](docs/chatgpt-setup.md) for registering your MCP endpoint as a ChatGPT App.
+1. In ChatGPT, go to **Settings > Apps & Connectors > Advanced settings** and enable **Developer mode**
+2. Go to **Settings > Connectors > Create**
+3. Enter your `mcp_endpoint_url` as the **Connector URL**
+4. Open a new chat, click **+ > More**, select your connector, and try: *"Show me all available unicorns"*
+
+See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructions, demo prompts, OAuth setup, and troubleshooting.
+
+## Widget Previews
+
+When tools execute, ChatGPT renders rich UI widgets inside the chat:
+
+| Unicorn List | Availability Check | Booking Confirmation |
+|:---:|:---:|:---:|
+| ![Unicorn List](screenshots/widget-unicorn-list-rendered.png) | ![Availability](screenshots/widget-availability-rendered.png) | ![Booking](screenshots/widget-booking-confirmation-rendered.png) |
+| `list_unicorns` tool | `check_availability` tool | `book_unicorn` tool |
 
 ## MCP Server Variants
 
