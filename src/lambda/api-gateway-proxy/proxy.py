@@ -10,6 +10,18 @@ import boto3
 
 client = boto3.client("bedrock-agentcore", region_name=os.environ.get("AWS_REGION"))
 RUNTIME_ARN = os.environ["RUNTIME_ARN"]
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+
+
+def _get_cors_origin(event):
+    """Return the request Origin if it's in the allowed list, else empty string."""
+    headers = event.get("headers", {}) or {}
+    origin = headers.get("origin") or headers.get("Origin", "")
+    if origin in CORS_ALLOWED_ORIGINS:
+        return origin
+    return ""
 
 
 def lambda_handler(event, context):
@@ -22,9 +34,17 @@ def lambda_handler(event, context):
     try:
         parsed = json.loads(body_str)
         print(f"MCP method: {parsed.get('method', 'unknown')} | id: {parsed.get('id', 'none')}")
-    except Exception:
-        parsed = {}
-        print(f"Non-JSON body: {body_str[:200]}")
+    except (json.JSONDecodeError, TypeError) as e:
+        print(f"Invalid JSON body: {body_str[:200]}")
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": _get_cors_origin(event)},
+            "body": json.dumps({
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": f"Parse error: {str(e)}"},
+            }),
+        }
 
     headers = event.get("headers", {}) or {}
     mcp_session_id = headers.get("mcp-session-id") or headers.get("Mcp-Session-Id", "")
@@ -56,7 +76,7 @@ def lambda_handler(event, context):
 
         resp_headers = {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": _get_cors_origin(event),
             "Access-Control-Allow-Headers": "Content-Type, Mcp-Session-Id",
             "Access-Control-Allow-Methods": "POST,OPTIONS",
         }
@@ -67,13 +87,12 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f"Runtime error: {e}")
-        body_parsed = json.loads(body_str)
         return {
             "statusCode": 200,
-            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": _get_cors_origin(event)},
             "body": json.dumps({
                 "jsonrpc": "2.0",
-                "id": body_parsed.get("id", 1),
+                "id": parsed.get("id", 1),
                 "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
             }),
         }

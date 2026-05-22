@@ -35,6 +35,15 @@ export class AgentCoreMcpStack extends cdk.Stack {
     const project = props.projectName;
 
     // ----------------------------------------------------------------
+    // CDK Parameters
+    // ----------------------------------------------------------------
+    const corsAllowedOriginsParam = new cdk.CfnParameter(this, "CorsAllowedOrigins", {
+      type: "String",
+      description: "Comma-separated list of allowed CORS origins",
+      default: "https://chatgpt.com,https://chat.openai.com,http://localhost:8000",
+    });
+
+    // ----------------------------------------------------------------
     // 1. S3 + CloudFront for Widgets
     // ----------------------------------------------------------------
     const widgetsBucket = new s3.Bucket(this, "WidgetsBucket", {
@@ -303,6 +312,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
         ProtocolConfiguration: "MCP",
         EnvironmentVariables: {
           UNICORN_SERVICE_FUNCTION: unicornServiceFn.functionName,
+          CORS_ALLOWED_ORIGINS: corsAllowedOriginsParam.valueAsString,
         },
       },
     });
@@ -330,6 +340,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: {
         RUNTIME_ARN: runtimeArn,
+        CORS_ALLOWED_ORIGINS: corsAllowedOriginsParam.valueAsString,
       },
     });
 
@@ -348,7 +359,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
       description: "ChatGPT MCP Proxy API",
       endpointTypes: [apigateway.EndpointType.REGIONAL],
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowOrigins: cdk.Fn.split(",", corsAllowedOriginsParam.valueAsString),
         allowMethods: ["POST", "OPTIONS"],
         allowHeaders: ["Content-Type", "Mcp-Session-Id"],
       },

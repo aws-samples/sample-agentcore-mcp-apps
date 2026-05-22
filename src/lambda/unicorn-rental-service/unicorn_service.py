@@ -110,33 +110,41 @@ def book_unicorn(params: dict) -> dict:
         return {"success": False, "error": "Unicorn not found."}
 
     unicorn = _decimal_to_native(unicorn)
-    if not unicorn["available"]:
+    if not unicorn.get("available", False):
         return {"success": False, "error": "Unicorn is not available for booking."}
+
+    # Validate required fields before modifying state to avoid inconsistency
+    unicorn_name = unicorn.get("name", "Unknown")
+    hourly_rate = unicorn.get("hourly_rate", 0)
 
     booking_id = f"BK-{uuid.uuid4().hex[:8].upper()}"
     booked_at = datetime.now(timezone.utc).isoformat()
 
-    # Mark unicorn as unavailable
-    unicorns_table.update_item(
-        Key={"unicorn_id": unicorn_id},
-        UpdateExpression="SET available = :val",
-        ExpressionAttributeValues={":val": False},
-    )
+    # Atomically mark unicorn as unavailable using a condition expression.
+    # This prevents the race condition where two concurrent requests both
+    # pass the availability check above — only one will succeed here.
+    try:
+        unicorns_table.update_item(
+            Key={"unicorn_id": unicorn_id},
+            UpdateExpression="SET available = :val",
+            ConditionExpression=Attr("available").eq(True),
+            ExpressionAttributeValues={":val": False},
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return {"success": False, "error": "Unicorn is not available for booking."}
 
     booking = {
         "booking_id": booking_id,
         "unicorn_id": unicorn_id,
+        "unicorn_name": unicorn_name,
         "customer_id": customer_id,
-        "hourly_rate": Decimal(str(unicorn["hourly_rate"])),
+        "hourly_rate": Decimal(str(hourly_rate)),
         "status": "booked",
         "booked_at": booked_at,
     }
     bookings_table.put_item(Item=booking)
 
-    booking_response = _decimal_to_native(booking)
-    booking_response["unicorn_name"] = unicorn["name"]
-
-    return {"success": True, "data": booking_response}
+    return {"success": True, "data": _decimal_to_native(booking)}
 
 
 def view_bookings(params: dict) -> dict:
@@ -154,34 +162,31 @@ def view_bookings(params: dict) -> dict:
         return {"success": True, "data": None, "message": "No active rentals found for this customer."}
 
     booking = _decimal_to_native(items[0])
-    unicorn_id = booking["unicorn_id"]
-
-    # Fetch unicorn details
-    unicorn_resp = unicorns_table.get_item(Key={"unicorn_id": unicorn_id})
-    unicorn = _decimal_to_native(unicorn_resp.get("Item", {}))
-    unicorn_name = unicorn.get("name", unicorn_id)
+    booking_id = booking["booking_id"]
+    unicorn_name = booking.get("unicorn_name", booking.get("unicorn_id", "unknown"))
+    booked_at_str = booking.get("booked_at", "")
+    hourly_rate = booking.get("hourly_rate", 0)
 
     # Calculate duration and running cost
     now = datetime.now(timezone.utc)
-    booked_at = datetime.fromisoformat(booking["booked_at"])
+    booked_at = datetime.fromisoformat(booked_at_str)
     duration_seconds = (now - booked_at).total_seconds()
     duration_hours = duration_seconds / 3600
     total_minutes = int(duration_seconds // 60)
     hours = total_minutes // 60
     minutes = total_minutes % 60
     duration_display = f"{hours}h {minutes}m"
-    cost_so_far = round(duration_hours * booking["hourly_rate"], 2)
+    cost_so_far = round(duration_hours * hourly_rate, 2)
 
     return {
         "success": True,
         "data": {
-            "booking_id": booking["booking_id"],
-            "unicorn_id": unicorn_id,
+            "booking_id": booking_id,
             "unicorn_name": unicorn_name,
             "customer_id": customer_id,
-            "booked_at": booking["booked_at"],
+            "booked_at": booked_at_str,
             "duration": duration_display,
-            "hourly_rate": booking["hourly_rate"],
+            "hourly_rate": hourly_rate,
             "cost_incurred": cost_so_far,
             "status": "booked",
         },
@@ -240,11 +245,13 @@ def return_unicorn(params: dict) -> dict:
         ExpressionAttributeValues={":val": True},
     )
 
+    unicorn_name = booking.get("unicorn_name", booking.get("unicorn_id", "unknown"))
+
     return {
         "success": True,
         "data": {
             "booking_id": booking_id,
-            "unicorn_id": booking["unicorn_id"],
+            "unicorn_name": unicorn_name,
             "customer_id": booking["customer_id"],
             "booked_at": booking["booked_at"],
             "returned_at": returned_at_iso,
