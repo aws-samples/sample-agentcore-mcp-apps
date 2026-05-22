@@ -18,9 +18,9 @@
     .detail-label { color: #888; font-size: 14px; }
     .detail-value { font-weight: 600; color: #333; font-size: 14px; }
     .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 700; text-transform: uppercase; background: #e8f5e9; color: #2e7d32; }
-    .total { margin-top: 16px; padding: 16px; background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border-radius: 8px; text-align: center; }
-    .total-amount { font-size: 32px; font-weight: 700; color: #1b5e20; }
-    .total-label { font-size: 12px; color: #558b2f; margin-top: 2px; }
+    .rate-info { margin-top: 16px; padding: 16px; background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border-radius: 8px; text-align: center; }
+    .rate-amount { font-size: 28px; font-weight: 700; color: #1b5e20; }
+    .rate-label { font-size: 12px; color: #558b2f; margin-top: 2px; }
     .loading { text-align: center; padding: 40px; color: #999; }
   </style>
 </head>
@@ -28,25 +28,27 @@
   <div id="root"><div class="loading">Processing booking...</div></div>
   <script>
     var root = document.getElementById('root');
+    function formatDate(isoStr) {
+      if (!isoStr) return 'N/A';
+      var d = new Date(isoStr);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    }
     function render(data) {
       if (!data) { root.innerHTML = '<div class="loading">No data.</div>'; return; }
-      if (data.error) { root.innerHTML = '<div class="error">Warning: ' + data.error + '</div>'; return; }
-      var u = data.unicorn;
+      if (data.error) { root.innerHTML = '<div class="loading">Warning: ' + data.error + '</div>'; return; }
       root.innerHTML =
         '<div class="card">' +
           '<div class="card-header">' +
-            '<div class="icon">Confirmed</div>' +
+            '<div class="icon">&#x2714;</div>' +
             '<h2>Booking Confirmed!</h2>' +
             '<div class="booking-id">' + data.booking_id + '</div>' +
           '</div>' +
           '<div class="card-body">' +
             '<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value"><span class="status-badge">' + data.status + '</span></span></div>' +
-            '<div class="detail-row"><span class="detail-label">Customer</span><span class="detail-value">' + data.customer_name + '</span></div>' +
-            '<div class="detail-row"><span class="detail-label">Unicorn</span><span class="detail-value">' + u.name + ' (' + u.type + ')</span></div>' +
-            '<div class="detail-row"><span class="detail-label">Date</span><span class="detail-value">' + data.date + '</span></div>' +
-            '<div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">' + data.duration_hours + ' hour' + (data.duration_hours > 1 ? 's' : '') + '</span></div>' +
-            '<div class="detail-row"><span class="detail-label">Rate</span><span class="detail-value">$' + u.hourly_rate.toFixed(2) + '/hr</span></div>' +
-            '<div class="total"><div class="total-amount">$' + data.total_cost.toFixed(2) + '</div><div class="total-label">Total Charged</div></div>' +
+            '<div class="detail-row"><span class="detail-label">Unicorn</span><span class="detail-value">' + data.unicorn_name + '</span></div>' +
+            '<div class="detail-row"><span class="detail-label">Booked At</span><span class="detail-value">' + formatDate(data.booked_at) + '</span></div>' +
+            '<div class="detail-row"><span class="detail-label">Hourly Rate</span><span class="detail-value">$' + Number(data.hourly_rate).toFixed(2) + '/hr</span></div>' +
+            '<div class="rate-info"><div class="rate-amount">$' + Number(data.hourly_rate).toFixed(2) + '/hr</div><div class="rate-label">Charged until returned</div></div>' +
           '</div>' +
         '</div>';
     }
