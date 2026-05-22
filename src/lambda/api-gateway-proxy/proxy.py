@@ -8,7 +8,7 @@ import json
 import os
 import boto3
 
-client = boto3.client("bedrock-agentcore", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+client = boto3.client("bedrock-agentcore", region_name=os.environ.get("AWS_REGION"))
 RUNTIME_ARN = os.environ["RUNTIME_ARN"]
 
 
@@ -23,6 +23,7 @@ def lambda_handler(event, context):
         parsed = json.loads(body_str)
         print(f"MCP method: {parsed.get('method', 'unknown')} | id: {parsed.get('id', 'none')}")
     except Exception:
+        parsed = {}
         print(f"Non-JSON body: {body_str[:200]}")
 
     headers = event.get("headers", {}) or {}
