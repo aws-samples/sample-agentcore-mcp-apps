@@ -53,17 +53,30 @@ lambda_client = boto3.client("lambda")
 def invoke_service(action: str, params: dict) -> dict:
     """Invoke the Unicorn Service Lambda and return the parsed response."""
     payload = json.dumps({"action": action, "params": params})
-    response = lambda_client.invoke(
-        FunctionName=UNICORN_SERVICE_FUNCTION,
-        InvocationType="RequestResponse",
-        Payload=payload.encode("utf-8"),
-    )
-    response_payload = json.loads(response["Payload"].read().decode("utf-8"))
 
-    # The Lambda returns {"statusCode": ..., "body": "..."}
-    if "body" in response_payload:
-        return json.loads(response_payload["body"])
-    return response_payload
+    try:
+        response = lambda_client.invoke(
+            FunctionName=UNICORN_SERVICE_FUNCTION,
+            InvocationType="RequestResponse",
+            Payload=payload.encode("utf-8"),
+        )
+
+        # Check for Lambda-level errors (unhandled exception or timeout)
+        if "FunctionError" in response:
+            error_payload = response["Payload"].read().decode("utf-8")
+            print(f"[invoke_service] Lambda function error for action '{action}': {error_payload}")
+            return {"success": False, "error": "Something went wrong. Please try again later."}
+
+        response_payload = json.loads(response["Payload"].read().decode("utf-8"))
+
+        # The Lambda returns {"statusCode": ..., "body": "..."}
+        if "body" in response_payload:
+            return json.loads(response_payload["body"])
+        return response_payload
+
+    except Exception as e:
+        print(f"[invoke_service] Error invoking Lambda for action '{action}': {e}")
+        return {"success": False, "error": "Something went wrong. Please try again later."}
 
 
 # --- Widget loading ---
@@ -346,7 +359,7 @@ _OUTPUT_SCHEMAS = {
         "type": "object",
         "properties": {
             "booking_id": {"type": "string"},
-            "unicorn_id": {"type": "string"},
+            "unicorn_name": {"type": "string"},
             "customer_id": {"type": "string"},
             "booked_at": {"type": "string"},
             "returned_at": {"type": "string"},
@@ -355,13 +368,12 @@ _OUTPUT_SCHEMAS = {
             "total_cost": {"type": "number"},
             "status": {"type": "string"},
         },
-        "required": ["booking_id", "unicorn_id", "customer_id", "booked_at", "returned_at", "duration", "hourly_rate", "total_cost", "status"],
+        "required": ["booking_id", "unicorn_name", "customer_id", "booked_at", "returned_at", "duration", "hourly_rate", "total_cost", "status"],
     },
     "view_bookings": {
         "type": "object",
         "properties": {
             "booking_id": {"type": "string"},
-            "unicorn_id": {"type": "string"},
             "unicorn_name": {"type": "string"},
             "customer_id": {"type": "string"},
             "booked_at": {"type": "string"},
@@ -370,7 +382,7 @@ _OUTPUT_SCHEMAS = {
             "cost_incurred": {"type": "number"},
             "status": {"type": "string"},
         },
-        "required": ["booking_id", "unicorn_id", "unicorn_name", "customer_id", "booked_at", "duration", "hourly_rate", "cost_incurred", "status"],
+        "required": ["booking_id", "unicorn_name", "customer_id", "booked_at", "duration", "hourly_rate", "cost_incurred", "status"],
     },
 }
 
@@ -380,13 +392,20 @@ for tool_name, schema in _OUTPUT_SCHEMAS.items():
         _tool.__dict__["output_schema"] = schema
 
 
+DEFAULT_ALLOWED_ORIGINS = "https://chatgpt.com,https://chat.openai.com,http://localhost:8000"
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS).split(",")
+    if origin.strip()
+]
+
 if __name__ == "__main__":
     app = mcp.streamable_http_app()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=ALLOWED_ORIGINS,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "Mcp-Session-Id"],
     )
 
     import uvicorn
