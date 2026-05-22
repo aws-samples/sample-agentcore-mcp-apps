@@ -359,7 +359,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
       description: "ChatGPT MCP Proxy API",
       endpointTypes: [apigateway.EndpointType.REGIONAL],
       defaultCorsPreflightOptions: {
-        allowOrigins: cdk.Fn.split(",", corsAllowedOriginsParam.valueAsString),
+        allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: ["POST", "OPTIONS"],
         allowHeaders: ["Content-Type", "Mcp-Session-Id"],
       },
