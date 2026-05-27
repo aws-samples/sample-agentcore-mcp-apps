@@ -31,19 +31,6 @@ You will be able to interact with the app with requests like -
 
 ## Architecture
 
-```
-ChatGPT ──HTTPS──> API Gateway ──> Lambda Proxy ──> AgentCore Runtime (MCP Server) ──> Unicorn Service Lambda ──> DynamoDB
-                                                                                                        │
-ChatGPT ──HTTPS──> CloudFront (widgets/*.html) ──> S3
-```
-
-**Separation of Concerns:**
-
-This project demonstrates a clean separation between the **MCP protocol layer** and the **business logic layer**:
-
-- **MCP Server** (AgentCore Runtime) — Handles MCP protocol, tool definitions, structured output, widget resources, and customer identity resolution from ChatGPT context. It delegates all business operations to the Unicorn Service Lambda.
-- **Unicorn Rental Service Lambda** — Pure business logic that accepts JSON requests and returns JSON responses.
-
 **Components:**
 
 | Component | Purpose |
@@ -56,15 +43,45 @@ This project demonstrates a clean separation between the **MCP protocol layer** 
 | **S3 + CloudFront** | Serves widget HTML files rendered inside ChatGPT |
 | **DynamoDB** | Stores unicorn inventory and booking records |
 
-## Prerequisites
+
+### How It Works
+
+#### Request Flow (Tool Calls)
+
+1. **ChatGPT** sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the API Gateway endpoint.
+1. **API Gateway** receives the HTTPS request, applies WAF rules (IP allowlisting, rate limiting, common attack protection), and routes it to the Proxy Lambda.
+1. **API Gateway Proxy Lambda** forwards the request to AgentCore Runtime.
+1. **AgentCore Runtime (MCP Server)** receives the MCP request, resolves customer identity from ChatGPT context, and invokes the Unicorn Service Lambda.
+1. **Unicorn Service Lambda** executes the business logic against DynamoDB and returns the results.
+1. **AgentCore Runtime (MCP Server)** wraps the response in MCP structured output with widget references and returns it to ChatGPT.
+
+#### Resource Flow (Widget Rendering)
+
+1. **ChatGPT** receives a `tools/call` response containing a widget resource URI (e.g., `ui://widget/unicorn-list.html`) in the `_meta.openai/outputTemplate` field.
+1. **ChatGPT** sends an MCP `resources/read` request for that URI to the API Gateway endpoint.
+1. **API Gateway** routes the request through WAF and forwards it to the Proxy Lambda.
+1. **API Gateway Proxy Lambda** forwards the request to AgentCore Runtime.
+1. **AgentCore Runtime (MCP Server)** resolves the resource URI, loads the corresponding widget HTML and returns it.
+1. **ChatGPT** renders the HTML widget inline, injecting the structured data from the original `tools/call` response into the template.
+1. Images needed are directly fetched from **CloudFront** (backed by S3).
+
+#### Separation of Concerns:
+
+This project demonstrates a clean separation between the **MCP protocol layer** and the **business logic layer**:
+
+- **MCP Server** (AgentCore Runtime) — Handles MCP protocol, tool definitions, structured output, widget resources, and customer identity resolution from ChatGPT context. It delegates all business operations to the Unicorn Service Lambda.
+- **Unicorn Rental Service Lambda** — Pure business logic that accepts JSON requests and returns JSON responses.
+
+
+## Deployment
+
+### Prerequisites
 
 - AWS account with [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) enabled
 - AWS CLI configured (`aws configure`)
 - Python 3.13+ with `pip` (for packaging the MCP server)
 - Node.js 22+ (for AWS CDK)
 - AWS CDK CLI installed globally: `npm install -g aws-cdk`
-
-## Deployment
 
 ### Step 1: Package the MCP Server
 
@@ -137,16 +154,6 @@ Note the outputs printed after deployment — you'll need the `McpEndpointUrl` f
 1. After the app gets created, open a new chat, click **+ > More**, select your connector, and try: *"Show me all unicorns"*
 
 See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructions, demo prompts, OAuth setup, and troubleshooting.
-
-## How It Works
-
-### Request Flow
-
-1. **ChatGPT** sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the API Gateway endpoint.
-1. **API Gateway Proxy Lambda** forwards the request to AgentCore Runtime.
-1. **MCP Server** running on AgentCore receives the MCP request, resolves customer identity from ChatGPT context, and invokes the Unicorn Service Lambda
-1. **Unicorn Service Lambda** executes the business logic against DynamoDB and returns the results
-1. **MCP Server** wraps the response in MCP structured output with widget references and returns it to ChatGPT.
 
 ## Security
 
