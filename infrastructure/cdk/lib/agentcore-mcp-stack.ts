@@ -7,8 +7,9 @@
  *   3. DynamoDB tables for unicorn and booking data
  *   4. IAM Role for AgentCore Runtime
  *   5. AgentCore Runtime (MCP Server) via direct code deploy
- *   6. Lambda proxy function
+ *   6. Lambda proxy function + Resource-based policy on Runtime
  *   7. API Gateway for ChatGPT connector
+ *   8. WAF Web ACL — ChatGPT IP allowlist + AWS Managed Rules
  */
 
 import * as cdk from "aws-cdk-lib";
@@ -20,6 +21,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
+import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { Construct } from "constructs";
 import * as path from "path";
@@ -329,6 +331,8 @@ export class AgentCoreMcpStack extends cdk.Stack {
       },
     });
 
+
+
     // ----------------------------------------------------------------
     // 6. Lambda Proxy
     // ----------------------------------------------------------------
@@ -352,6 +356,67 @@ export class AgentCoreMcpStack extends cdk.Stack {
     );
 
     // ----------------------------------------------------------------
+    // 6b. Resource-Based Policy — restrict runtime invocation to proxy Lambda only
+    // Uses a custom Lambda (boto3) since the CDK AwsCustomResource SDK package
+    // for BedrockAgentCoreControl is not yet available in the custom resource runtime.
+    // ----------------------------------------------------------------
+    const resourcePolicyFn = new lambda.Function(this, "ResourcePolicyFunction", {
+      functionName: `${project}-resource-policy-cr`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: "index.lambda_handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "..", "lambda", "resource-policy-cr")),
+      timeout: cdk.Duration.seconds(60),
+    });
+
+    resourcePolicyFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "bedrock-agentcore:PutResourcePolicy",
+          "bedrock-agentcore:GetResourcePolicy",
+          "bedrock-agentcore:DeleteResourcePolicy",
+        ],
+        resources: ["*"],
+      })
+    );
+
+    const resourcePolicyProvider = new cr.Provider(this, "ResourcePolicyProvider", {
+      onEventHandler: resourcePolicyFn,
+    });
+
+    new cdk.CustomResource(this, "RuntimeResourcePolicy", {
+      serviceToken: resourcePolicyProvider.serviceToken,
+      properties: {
+        ResourceArn: runtimeArn,
+        Policy: JSON.stringify({
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Sid: "AllowProxyLambdaOnly",
+              Effect: "Allow",
+              Principal: {
+                AWS: proxyFn.role!.roleArn,
+              },
+              Action: "bedrock-agentcore:InvokeAgentRuntime",
+              Resource: runtimeArn,
+            },
+            {
+              Sid: "DenyAllOtherPrincipals",
+              Effect: "Deny",
+              Principal: "*",
+              Action: "bedrock-agentcore:InvokeAgentRuntime",
+              Resource: runtimeArn,
+              Condition: {
+                StringNotEquals: {
+                  "aws:PrincipalArn": proxyFn.role!.roleArn,
+                },
+              },
+            },
+          ],
+        }),
+      },
+    });
+
+    // ----------------------------------------------------------------
     // 7. API Gateway
     // ----------------------------------------------------------------
     const api = new apigateway.RestApi(this, "McpApi", {
@@ -367,6 +432,156 @@ export class AgentCoreMcpStack extends cdk.Stack {
 
     const mcpResource = api.root.addResource("mcp");
     mcpResource.addMethod("POST", new apigateway.LambdaIntegration(proxyFn));
+
+    // ----------------------------------------------------------------
+    // 8. WAF — IP Allowlist + Basic Protection
+    // ----------------------------------------------------------------
+
+    // ChatGPT Actions outbound IP ranges (source: https://openai.com/chatgpt-actions.json)
+    // IMPORTANT: This list changes periodically. Check the URL above for updates.
+    const chatGptIpSet = new wafv2.CfnIPSet(this, "ChatGptIpSet", {
+      name: `${project}-chatgpt-ips`,
+      scope: "REGIONAL",
+      ipAddressVersion: "IPV4",
+      addresses: [
+        "104.210.139.192/28", "104.210.139.224/28", "13.65.138.112/28",
+        "13.65.138.96/28", "13.67.72.16/28", "13.70.107.160/28",
+        "13.71.2.208/28", "13.76.115.224/28", "13.76.116.80/28",
+        "13.76.32.208/28", "13.83.237.176/28", "132.196.82.48/28",
+        "135.119.134.128/28", "135.119.134.192/28", "135.220.73.208/28",
+        "135.237.133.48/28", "137.135.191.176/28", "15.168.252.168/32",
+        "172.170.8.208/28", "172.177.53.240/28", "172.183.143.224/28",
+        "172.196.40.208/28", "172.202.102.112/28", "172.204.16.64/28",
+        "172.212.159.64/28", "172.213.11.144/28", "191.233.1.128/28",
+        "191.233.1.224/28", "191.233.196.112/28", "191.234.167.128/28",
+        "191.235.98.144/28", "191.237.249.64/28", "20.0.53.96/28",
+        "20.102.212.144/28", "20.113.218.16/28", "20.125.112.224/28",
+        "20.168.7.192/28", "20.168.7.240/28", "20.169.72.112/28",
+        "20.169.72.96/28", "20.169.78.208/28", "20.169.78.48/28",
+        "20.169.78.64/28", "20.169.78.80/28", "20.169.78.96/28",
+        "20.169.86.224/28", "20.17.108.96/28", "20.172.29.32/28",
+        "20.193.50.32/28", "20.194.0.208/28", "20.194.157.176/28",
+        "20.198.67.96/28", "20.203.245.32/28", "20.206.107.192/28",
+        "20.210.154.128/28", "20.210.174.208/28", "20.215.187.208/28",
+        "20.215.214.16/28", "20.215.219.208/28", "20.215.220.128/28",
+        "20.215.220.144/28", "20.215.220.160/28", "20.215.220.64/28",
+        "20.215.220.80/28", "20.227.140.32/28", "20.228.106.176/28",
+        "20.235.75.208/28", "20.235.87.224/28", "20.249.63.208/28",
+        "20.42.250.32/28", "20.44.100.224/28", "20.45.178.144/28",
+        "20.55.229.144/28", "20.57.199.192/28", "20.63.221.64/28",
+        "23.102.141.32/28", "23.97.109.224/28", "23.98.186.64/28",
+        "23.98.186.96/28", "4.151.119.48/28", "4.151.71.176/28",
+        "4.189.118.208/28", "4.196.198.80/28", "4.197.115.112/28",
+        "4.197.19.176/28", "4.197.64.0/28", "4.197.64.48/28",
+        "4.205.128.176/28", "4.226.226.32/28", "40.67.183.160/28",
+        "40.67.183.176/28", "40.81.134.128/28", "40.84.181.32/28",
+        "44.249.227.138/32", "48.193.44.32/28", "51.116.2.64/28",
+        "52.148.129.32/28", "52.153.130.48/28", "52.165.212.48/28",
+        "52.17.188.55/32", "52.172.129.160/28", "52.172.251.112/28",
+        "52.173.123.0/28", "52.173.221.16/28", "52.173.234.16/28",
+        "52.173.234.80/28", "52.176.139.176/28", "52.190.137.144/28",
+        "52.190.137.16/28", "52.190.139.48/28", "52.190.142.64/28",
+        "52.208.217.159/32", "52.231.30.48/28", "52.231.39.144/28",
+        "52.231.39.192/28", "52.242.132.224/28", "52.242.132.240/28",
+        "52.242.245.208/28", "52.252.113.240/28", "52.255.109.112/28",
+        "52.255.109.128/28", "52.255.109.144/28", "52.255.109.80/28",
+        "52.255.109.96/28", "52.255.111.0/28", "52.255.111.16/28",
+        "52.255.111.32/28", "52.43.161.225/32", "56.155.71.179/32",
+        "57.151.131.224/28", "57.154.174.112/28", "57.154.187.32/28",
+        "68.154.28.96/28", "68.220.57.64/28", "68.221.67.160/28",
+        "68.221.67.240/28", "68.221.75.16/28", "74.226.253.160/28",
+        "74.249.86.176/28", "74.7.35.112/28", "74.7.35.48/28",
+        "74.7.36.64/28", "74.7.36.80/28", "74.7.36.96/28",
+        "9.160.163.224/28", "9.234.96.192/28",
+      ],
+    });
+
+    // Web ACL with IP allowlist + AWS Managed Rules for common threats
+    const webAcl = new wafv2.CfnWebACL(this, "ApiWafAcl", {
+      name: `${project}-api-waf`,
+      scope: "REGIONAL",
+      defaultAction: { block: {} },
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: `${project}-waf-metrics`,
+        sampledRequestsEnabled: true,
+      },
+      rules: [
+        // Rule 1: Allow only ChatGPT IPs
+        {
+          name: "AllowChatGptIPs",
+          priority: 1,
+          action: { allow: {} },
+          statement: {
+            ipSetReferenceStatement: {
+              arn: chatGptIpSet.attrArn,
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `${project}-chatgpt-ip-allow`,
+            sampledRequestsEnabled: true,
+          },
+        },
+        // Rule 2: AWS Managed Rules — Common Rule Set (blocks known bad inputs)
+        {
+          name: "AWSManagedRulesCommonRuleSet",
+          priority: 2,
+          overrideAction: { none: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: "AWS",
+              name: "AWSManagedRulesCommonRuleSet",
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `${project}-common-rules`,
+            sampledRequestsEnabled: true,
+          },
+        },
+        // Rule 3: AWS Managed Rules — Known Bad Inputs (Log4j, etc.)
+        {
+          name: "AWSManagedRulesKnownBadInputsRuleSet",
+          priority: 3,
+          overrideAction: { none: {} },
+          statement: {
+            managedRuleGroupStatement: {
+              vendorName: "AWS",
+              name: "AWSManagedRulesKnownBadInputsRuleSet",
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `${project}-known-bad-inputs`,
+            sampledRequestsEnabled: true,
+          },
+        },
+        // Rule 4: Rate limiting — 1000 requests per 5 minutes per IP
+        {
+          name: "RateLimitRule",
+          priority: 4,
+          action: { block: {} },
+          statement: {
+            rateBasedStatement: {
+              limit: 1000,
+              aggregateKeyType: "IP",
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `${project}-rate-limit`,
+            sampledRequestsEnabled: true,
+          },
+        },
+      ],
+    });
+
+    // Associate WAF Web ACL with API Gateway stage
+    new wafv2.CfnWebACLAssociation(this, "ApiWafAssociation", {
+      resourceArn: `arn:aws:apigateway:${this.region}::/restapis/${api.restApiId}/stages/${api.deploymentStage.stageName}`,
+      webAclArn: webAcl.attrArn,
+    });
 
     // ----------------------------------------------------------------
     // Outputs
