@@ -15,7 +15,12 @@ This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelc
 
 ## Demo
 
-<< GIF or SCREENSHOTS >>
+| Action | Screenshot |
+|-----------|---------|
+| List Unicorms: | <a href="docs/images/list.png"><img src="docs/images/list.png" width="150" alt="Unicorn List" style="margin-right:10px;" /></a> |
+| Book Unicorns: | <a href="docs/images/book.png"><img src="docs/images/book.png" width="150" alt="Book a unicorn" style="margin-right:10px;" /></a> |
+| Show bookings: | <a href="docs/images/show.png"><img src="docs/images/show.png" width="150" alt="Show bookings" style="margin-right:10px;" /></a> |
+| Return unicorn: | <a href="docs/images/return.png"><img src="docs/images/return.png" width="150" alt="Return unicorns" /></a> |
 
 You will be able to interact with the app with requests like - 
 1. List all unicorns
@@ -27,10 +32,9 @@ You will be able to interact with the app with requests like -
 ## Architecture
 
 ```
-ChatGPT ──HTTPS──> API Gateway (/mcp) ──> Lambda Proxy ──> AgentCore Runtime (MCP Server) ──> Unicorn Service Lambda ──> DynamoDB
+ChatGPT ──HTTPS──> API Gateway ──> Lambda Proxy ──> AgentCore Runtime (MCP Server) ──> Unicorn Service Lambda ──> DynamoDB
                                                                                                         │
-ChatGPT ──HTTPS──> CloudFront (widgets/*.html) ──> S3                                                   ▼
-                                                                                              Unicorns Table / Bookings Table
+ChatGPT ──HTTPS──> CloudFront (widgets/*.html) ──> S3
 ```
 
 **Separation of Concerns:**
@@ -144,6 +148,29 @@ See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructi
 1. **Unicorn Service Lambda** executes the business logic against DynamoDB and returns the results
 1. **MCP Server** wraps the response in MCP structured output with widget references and returns it to ChatGPT.
 
+## Security
+
+This project implements multiple layers of security to protect the API endpoint and backend services:
+
+### 1. WAF IP Allowlisting (API Gateway)
+
+AWS WAF is attached to the API Gateway with a **default-deny** policy. Only requests originating from [ChatGPT's published outbound IP ranges](https://openai.com/chatgpt-actions.json) are allowed through. This ensures no arbitrary internet traffic can reach your endpoint.
+
+> **⚠️ Important:** OpenAI updates the ChatGPT Actions IP list periodically (typically every few months). If ChatGPT requests start failing with 403 errors, check [https://openai.com/chatgpt-actions.json](https://openai.com/chatgpt-actions.json) for updated CIDR ranges and update the `chatGptIpSet` addresses in `infrastructure/cdk/lib/agentcore-mcp-stack.ts`.
+
+### 2. WAF Managed Rules (Common Attack Protection)
+
+In addition to IP allowlisting, the WAF Web ACL includes:
+
+- **AWS Managed Rules Common Rule Set** — Blocks requests matching common attack patterns (XSS, SQL injection, path traversal, etc.)
+- **AWS Managed Rules Known Bad Inputs** — Blocks requests with payloads known to be associated with exploitation (Log4j/Log4Shell, Java deserialization, etc.)
+- **Rate Limiting** — Blocks IPs exceeding 1,000 requests per 5-minute window to prevent abuse
+
+### 3. Resource-Based Policy (AgentCore Runtime)
+
+A resource-based access policy is attached directly to the AgentCore Runtime. It explicitly allows only the API Gateway Proxy Lambda's execution role to invoke the runtime, and denies all other principals. Even if an attacker bypasses the API Gateway layer, they cannot directly call the AgentCore Runtime without the correct IAM credentials.
+
+
 ## Cleanup
 
 To destroy all deployed resources:
@@ -152,17 +179,3 @@ To destroy all deployed resources:
 cd infrastructure/cdk
 npx cdk destroy
 ```
-
-## Widget Previews
-
-When tools execute, ChatGPT renders rich UI widgets inside the chat:
-
-| Unicorn List | Availability Check | Booking Confirmation |
-|:---:|:---:|:---:|
-| ![Unicorn List](screenshots/widget-unicorn-list-rendered.png) | ![Availability](screenshots/widget-availability-rendered.png) | ![Booking](screenshots/widget-booking-confirmation-rendered.png) |
-| `list_unicorns` tool | `check_availability` tool | `book_unicorn` tool |
-
-
-## License
-
-This library is licensed under the Apache 2.0 License. See the LICENSE file.
