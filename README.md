@@ -155,7 +155,7 @@ See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructi
 
 ### Using with Claude
 
-This MCP server also works with Claude Desktop, Claude Code, and the Anthropic API. The tools are fully functional — Claude receives text responses (no widget rendering). See the [Claude Setup Guide](docs/claude-setup.md) for configuration instructions.
+This MCP server uses the **MCP Apps** open standard for widget rendering, which means the same rich interactive UI cards work in both ChatGPT and Claude. Add it as a Custom Connector on claude.ai or configure Claude Desktop — you get the full experience including widget cards. See the [Claude Setup Guide](docs/claude-setup.md) for configuration instructions.
 
 ## Security
 
