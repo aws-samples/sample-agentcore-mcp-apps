@@ -4,21 +4,18 @@ This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelc
 
 ## Architecture
 
-```
-ChatGPT ──HTTPS──> API Gateway (/mcp) ──> Lambda Proxy ──> AgentCore Runtime (MCP Server)
-ChatGPT ──HTTPS──> CloudFront (widgets/*.html)
-```
+![Architecture Diagram](docs/architecture-diagram.png)
 
-**Components:**
+**How it works:**
 
-| Component | Purpose |
-|-----------|---------|
-| **MCP Server** | Python or TypeScript server with tools (list, check availability, book) |
-| **AgentCore Runtime** | Managed container runtime for the MCP server |
-| **Lambda Proxy** | Translates HTTPS from API Gateway into `InvokeAgentRuntime` calls |
-| **API Gateway** | Public HTTPS endpoint for ChatGPT to call |
-| **S3 + CloudFront** | Serves widget HTML files rendered inside ChatGPT |
-| **Cognito** | JWT authentication for the AgentCore Runtime |
+- **User → ChatGPT** — The user sends natural language prompts (e.g. "Show me available unicorns") via ChatGPT, which translates them into MCP tool calls.
+- **AWS WAF** — Protects the API Gateway with a ChatGPT IP allowlist, AWS Managed Rules (XSS, SQLi, Log4j), and rate limiting (1000 req/5 min).
+- **API Gateway → Proxy Lambda** — Receives the MCP JSON-RPC POST request and the Lambda translates it into an `InvokeAgentRuntime` call to Bedrock AgentCore.
+- **Bedrock AgentCore Runtime** — Hosts the MCP server (Python 3.13, direct code deploy from S3). Handles MCP protocol, tool definitions, structured output, and customer identity resolution. A resource-based policy restricts invocation to the Proxy Lambda only.
+- **Unicorn Service Lambda** — Pure business logic layer invoked by the MCP server. Implements list, book, view, and return operations against DynamoDB.
+- **DynamoDB** — Two tables store unicorn inventory (`unicorns`) and booking records (`bookings`). Atomic conditional updates prevent double-booking race conditions.
+- **CloudFront → S3** — Serves widget HTML templates and unicorn images that ChatGPT renders inline as rich interactive UI cards.
+- **S3 (Deployment)** — Stores the MCP server ZIP artifact used by AgentCore Runtime's direct code deploy mechanism.
 
 ## Prerequisites
 
