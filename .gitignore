@@ -38,4 +38,5 @@ Thumbs.db
 lambda.zip
 
 # Build
+build/
 *.zip
