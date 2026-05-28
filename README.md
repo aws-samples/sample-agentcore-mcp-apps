@@ -151,7 +151,11 @@ Note the outputs printed after deployment — you'll need the `McpEndpointUrl` f
 1. Create the App.
 1. After the app gets created, open a new chat, click **+ > More**, select your connector, and try: *"Show me all unicorns"*
 
-See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructions, demo prompts, OAuth setup, and troubleshooting.
+See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructions, demo prompts, and troubleshooting.
+
+### Using with Claude
+
+This MCP server also works with Claude Desktop, Claude Code, and the Anthropic API. The tools are fully functional — Claude receives text responses (no widget rendering). See the [Claude Setup Guide](docs/claude-setup.md) for configuration instructions.
 
 ## Security
 
