@@ -1,5 +1,5 @@
 {
-  "name": "agentcore-mcp-cdk",
+  "name": "agentcore-mcp-apps",
   "version": "1.0.0",
   "scripts": {
     "build": "tsc",

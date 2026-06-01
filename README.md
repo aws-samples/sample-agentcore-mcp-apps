@@ -1,4 +1,4 @@
-# Deploy MCP Server on Amazon Bedrock AgentCore for ChatGPT
+# AgentCore MCP Apps
 
 Enterprises building AI-powered experiences need a way to expose their backend services and data to LLM-based interfaces like ChatGPT — without rewriting their APIs or tightly coupling to a single AI provider. This project demonstrates how to solve that problem using the **Model Context Protocol (MCP)** standard, deployed on **Amazon Bedrock AgentCore Runtime**.
 
