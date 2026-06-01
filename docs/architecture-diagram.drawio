@@ -7,7 +7,7 @@
 <mxCell id="1" parent="0"/>
 
 <!-- TITLE -->
-<mxCell id="title" value="Unicorn Rentals — MCP Server on Amazon Bedrock AgentCore Runtime" style="text;html=1;fontSize=14;fontStyle=1;fontColor=#232F3E;align=left;verticalAlign=middle;" vertex="1" parent="1">
+<mxCell id="title" value="AgentCore MCP Apps — Unicorn Rentals Demo" style="text;html=1;fontSize=14;fontStyle=1;fontColor=#232F3E;align=left;verticalAlign=middle;" vertex="1" parent="1">
   <mxGeometry x="30" y="15" width="550" height="25" as="geometry"/>
 </mxCell>
 
