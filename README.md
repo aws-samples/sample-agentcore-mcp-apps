@@ -1,8 +1,8 @@
-# AgentCore MCP Apps
+# Deploy an MCP App on Amazon Bedrock AgentCore
 
-Enterprises building AI-powered experiences need a way to expose their backend services and data to LLM-based interfaces like ChatGPT — without rewriting their APIs or tightly coupling to a single AI provider. This project demonstrates how to solve that problem using the **Model Context Protocol (MCP)** standard, deployed on **Amazon Bedrock AgentCore Runtime**.
+Enterprises building AI-powered experiences need a way to expose their backend services as interactive, conversational tools — without rewriting APIs or coupling to a single AI host. This project demonstrates how to do that using **[MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview)** — an extension to the Model Context Protocol that lets MCP servers deliver interactive HTML user interfaces rendered directly inside AI hosts like ChatGPT, Claude, and VS Code Copilot — deployed on **Amazon Bedrock AgentCore Runtime**.
 
-The sample implements **Unicorn Rentals** — a conversational rental service driven through natural language in ChatGPT, with rich interactive widgets rendered inline for each step. Customers can:
+The sample implements **Unicorn Rentals** — a conversational rental service with rich interactive widgets rendered inline. Because MCP Apps are host-agnostic, the same server works across any supporting client. Customers can:
 
 - **List unicorns** — Browse the full fleet with details like name, speed, color, availability and hourly rate
 - **Book a unicorn** — Reserve a unicorn at its hourly rate and receive a booking confirmation
@@ -11,7 +11,15 @@ The sample implements **Unicorn Rentals** — a conversational rental service dr
 
 ---
 
-This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server on [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) and connect it to ChatGPT with rich widget UI support.
+This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server with [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) on [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) and connect it to AI hosts (ChatGPT, Claude, etc.) with rich interactive widget UI.
+
+## Tech Stack
+
+- **MCP Server**: Node.js 22 / TypeScript
+- **Business Logic**: Python Lambda (DynamoDB access)
+- **Proxy Lambda**: Node.js 22 / TypeScript
+- **Infrastructure**: AWS CDK (TypeScript)
+- **Runtime**: Amazon Bedrock AgentCore Runtime (NODEJS_22)
 
 ## Demo
 
@@ -33,42 +41,42 @@ You will be able to interact with the app with requests like:
 ![Architecture Diagram](docs/architecture-diagram.png)
 
 **How it works:**
-
-- **User → ChatGPT** — The user sends natural language prompts (e.g. "Show me available unicorns") via ChatGPT, which translates them into MCP tool calls.
-- **AWS WAF** — Protects the API Gateway with a ChatGPT IP allowlist, AWS Managed Rules (XSS, SQLi, Log4j), and rate limiting (1000 req/5 min).
-- **API Gateway → Proxy Lambda** — Receives the MCP JSON-RPC POST request and the Lambda translates it into an `InvokeAgentRuntime` call to Bedrock AgentCore.
-- **Bedrock AgentCore Runtime** — Hosts the MCP server (Python 3.13, direct code deploy from S3). Handles MCP protocol, tool definitions, structured output, and customer identity resolution. A resource-based policy restricts invocation to the Proxy Lambda only.
-- **Unicorn Service Lambda** — Pure business logic layer invoked by the MCP server. Implements list, book, view, and return operations against DynamoDB.
-- **DynamoDB** — Two tables store unicorn inventory (`unicorns`) and booking records (`bookings`). Atomic conditional updates prevent double-booking race conditions.
-- **CloudFront → S3** — Serves widget HTML templates and unicorn images that ChatGPT renders inline as rich interactive UI cards.
-- **S3 (Deployment)** — Stores the MCP server ZIP artifact used by AgentCore Runtime's direct code deploy mechanism.
+| Component | Purpose |
+|-----------|---------|
+| **MCP Server** (Node.js/TS) | Thin MCP protocol layer — receives JSON-RPC, resolves identity, invokes service Lambda, serves widget HTML as MCP resources |
+| **Unicorn Rental Service** (Python) | Lambda function that implements business logic (list, book, view, return unicorns) with DynamoDB access |
+| **AgentCore Runtime** | Managed runtime hosting the MCP server (Node.js 22) |
+| **API Gateway** | Public HTTPS endpoint for MCP hosts to call |
+| **API Gateway Proxy Lambda** (Node.js/TS) | Translates HTTPS from API Gateway into `InvokeAgentRuntime` calls |
+| **S3 + CloudFront** | Serves unicorn images referenced by widgets |
+| **DynamoDB** | Stores unicorn inventory and booking records |
 
 ### How It Works
 
 #### Request Flow (Tool Calls)
 
-1. **ChatGPT** sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the API Gateway endpoint.
+1. **The MCP host** sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the API Gateway endpoint.
 1. **API Gateway** receives the HTTPS request, applies WAF rules (IP allowlisting, rate limiting, common attack protection), and routes it to the Proxy Lambda.
 1. **API Gateway Proxy Lambda** forwards the request to AgentCore Runtime.
-1. **AgentCore Runtime (MCP Server)** receives the MCP request, resolves customer identity from ChatGPT context, and invokes the Unicorn Service Lambda.
+1. **AgentCore Runtime (MCP Server)** receives the MCP request, resolves customer identity from the host context, and invokes the Unicorn Service Lambda.
 1. **Unicorn Service Lambda** executes the business logic against DynamoDB and returns the results.
-1. **AgentCore Runtime (MCP Server)** wraps the response in MCP structured output with widget references and returns it to ChatGPT.
+1. **AgentCore Runtime (MCP Server)** wraps the response in MCP structured output with widget resource references and returns it to the host.
 
 #### Resource Flow (Widget Rendering)
 
-1. **ChatGPT** receives a `tools/call` response containing a widget resource URI (e.g., `ui://widget/unicorn-list.html`) in the `_meta.openai/outputTemplate` field.
-1. **ChatGPT** sends an MCP `resources/read` request for that URI to the API Gateway endpoint.
+1. **The MCP host** receives a `tools/call` response containing a widget resource URI (e.g., `ui://widget/unicorn-list`) in the tool's `_meta.ui.resourceUri` field.
+1. **The MCP host** sends an MCP `resources/read` request for that URI to the API Gateway endpoint.
 1. **API Gateway** routes the request through WAF and forwards it to the Proxy Lambda.
 1. **API Gateway Proxy Lambda** forwards the request to AgentCore Runtime.
-1. **AgentCore Runtime (MCP Server)** resolves the resource URI, loads the corresponding widget HTML and returns it.
-1. **ChatGPT** renders the HTML widget inline, injecting the structured data from the original `tools/call` response into the template.
-1. Images needed are directly fetched from **CloudFront** (backed by S3).
+1. **AgentCore Runtime (MCP Server)** resolves the resource URI, loads the corresponding widget HTML (served as an MCP resource using `registerAppResource`) and returns it.
+1. **The MCP host** renders the HTML widget in a sandboxed iframe, injecting the structured data from the original `tools/call` response via the MCP Apps lifecycle.
+1. Images referenced by widgets are fetched directly from **CloudFront** (backed by S3).
 
 #### Separation of Concerns
 
 This project demonstrates a clean separation between the **MCP protocol layer** and the **business logic layer**:
 
-- **MCP Server** (AgentCore Runtime) — Handles MCP protocol, tool definitions, structured output, widget resources, and customer identity resolution from ChatGPT context. It delegates all business operations to the Unicorn Service Lambda.
+- **MCP Server** (AgentCore Runtime) — Handles MCP protocol, tool definitions, structured output, widget resources (MCP Apps pattern), and customer identity resolution from host context. It delegates all business operations to the Unicorn Service Lambda.
 - **Unicorn Rental Service Lambda** — Pure business logic that accepts JSON requests and returns JSON responses.
 
 ## Deployment
@@ -77,29 +85,43 @@ This project demonstrates a clean separation between the **MCP protocol layer** 
 
 - AWS account with [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) enabled
 - AWS CLI configured (`aws configure`)
-- Python 3.13+ with `pip` (for packaging the MCP server)
-- Node.js 22+ (for AWS CDK)
+- Node.js 22+ (for MCP server, proxy Lambda, and AWS CDK)
 - AWS CDK CLI installed globally: `npm install -g aws-cdk`
 
-### Step 1: Package the MCP Server
+### Step 1: Build the Proxy Lambda
 
-The shell script installs Python dependencies and bundles them with the server code into a zip file for AgentCore Runtime direct code deployment.
+```bash
+cd src/lambda/api-gateway-proxy
+npm install
+npm run build
+cd ../../..
+```
+
+This produces `src/lambda/api-gateway-proxy/dist/index.mjs`.
+
+### Step 2: Package the MCP Server
 
 ```bash
 chmod +x src/scripts/package-mcp-server.sh
 ./src/scripts/package-mcp-server.sh
 ```
 
-This produces `build/mcp-server-deployment.zip`.
+This script:
+1. Installs dependencies (clean install)
+2. Bundles widget HTML files with Vite using `vite-plugin-singlefile` (inlines the MCP Apps SDK so widgets work on any host without external CDN dependencies)
+3. Bundles the Node.js server with esbuild into a single `main.js`
+4. Packages everything into `build/mcp-server-deployment.zip`
 
-### Step 2: Install CDK Dependencies
+The build output is pure JavaScript — no native modules — so it runs on ARM64 AgentCore Runtime regardless of the build host architecture.
+
+### Step 3: Install CDK Dependencies
 
 ```bash
 cd infrastructure/cdk
 npm install
 ```
 
-### Step 3: Bootstrap CDK (first time only)
+### Step 4: Bootstrap CDK (first time only)
 
 If this is the first time deploying CDK in your AWS account/region, you need to bootstrap:
 
@@ -107,7 +129,7 @@ If this is the first time deploying CDK in your AWS account/region, you need to 
 npx cdk bootstrap
 ```
 
-### Step 4: Synthesize the CloudFormation Template
+### Step 5: Synthesize the CloudFormation Template
 
 Verify the stack synthesizes without errors:
 
@@ -121,9 +143,9 @@ You can optionally pass a custom project name via context:
 npx cdk synth -c projectName=unicorn-rentals
 ```
 
-The default project name is `unicorn-rentals`.
+The default project name is `unicorn-mcp`.
 
-### Step 5: Deploy
+### Step 6: Deploy
 
 ```bash
 npx cdk deploy
@@ -135,15 +157,18 @@ CDK will:
 3. Deploy the **Unicorn Service Lambda** with DynamoDB permissions
 4. Create the IAM role for AgentCore with S3 read and Lambda invoke permissions
 5. Create the AgentCore Runtime (MCP Server) pointing to the service Lambda
-6. Deploy the API Gateway Proxy Lambda and API Gateway
+6. Deploy the API Gateway Proxy Lambda
+7. Deploy API Gateway with WAF
 
-Note the outputs printed after deployment — you'll need the `McpEndpointUrl` for ChatGPT.
+Note the outputs printed after deployment — you'll need the `McpEndpointUrl` to connect an MCP host.
 
-### Step 6: Connect to ChatGPT
+### Step 7: Connect to an MCP Host
+
+#### ChatGPT
 
 1. In ChatGPT, go to **Settings > Apps > Advanced settings** and enable **Developer mode**
 1. Go to **Settings > Apps > Create app**
-1. Set the values:
+1. Set the values -
    1. `name` : UnicornRentals
    1. `description` : Allows you to list unicorns, rent unicorns, view rented unicorns and return unicorns
    1. `McpEndpointUrl` : Get from the CDK output variable "AgentCoreMcpStack.McpEndpointUrl".
@@ -157,27 +182,31 @@ See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructi
 
 This MCP server uses the **MCP Apps** open standard for widget rendering, which means the same rich interactive UI cards work in both ChatGPT and Claude. Add it as a Custom Connector on claude.ai or configure Claude Desktop — you get the full experience including widget cards. See the [Claude Setup Guide](docs/claude-setup.md) for configuration instructions.
 
+#### Claude
+
+1. In [Claude](https://claude.ai/), click your profile and go to **Settings > Connectors > Add custom connector**
+1. Paste the `McpEndpointUrl` from CDK output
+1. Set authentication to None. 
+1. Create the Connector.
+1. Start a new chat and try: *"Show me all unicorns"*
+
 ## Security
 
 This project implements multiple layers of security to protect the API endpoint and backend services:
 
 ### 1. WAF IP Allowlisting (API Gateway)
 
-AWS WAF is attached to the API Gateway with a **default-deny** policy. Only requests originating from [ChatGPT's published outbound IP ranges](https://openai.com/chatgpt-actions.json) are allowed through. This ensures no arbitrary internet traffic can reach your endpoint.
-
-> **Warning:** OpenAI updates the ChatGPT Actions IP list periodically (typically every few months). If ChatGPT requests start failing with 403 errors, check [https://openai.com/chatgpt-actions.json](https://openai.com/chatgpt-actions.json) for updated CIDR ranges and update the `chatGptIpSet` addresses in `infrastructure/cdk/lib/agentcore-mcp-stack.ts`.
+AWS WAF is attached to the API Gateway with a **default-deny** policy. Only requests originating from allowlisted IP ranges are permitted through. The deployed stack includes outbound IP ranges for both ChatGPT ([OpenAI outbound IPs](https://openai.com/chatgpt-actions.json)) and Claude ([Anthropic outbound IPs](https://docs.anthropic.com/en/api/ip-addresses)). To connect additional MCP hosts or for testing the MCP server directly using tools like MCP Inspector, add their outbound IP ranges to the WAF IP set.
 
 ### 2. WAF Managed Rules (Common Attack Protection)
 
-In addition to IP allowlisting, the WAF Web ACL includes:
-
-- **AWS Managed Rules Common Rule Set** — Blocks requests matching common attack patterns (XSS, SQL injection, path traversal, etc.)
-- **AWS Managed Rules Known Bad Inputs** — Blocks requests with payloads known to be associated with exploitation (Log4j/Log4Shell, Java deserialization, etc.)
-- **Rate Limiting** — Blocks IPs exceeding 1,000 requests per 5-minute window to prevent abuse
+- **AWS Managed Rules Common Rule Set** — Blocks requests matching common attack patterns
+- **AWS Managed Rules Known Bad Inputs** — Blocks requests with payloads known to be associated with exploitation
+- **Rate Limiting** — Blocks IPs exceeding 1,000 requests per 5-minute window
 
 ### 3. Resource-Based Policy (AgentCore Runtime)
 
-A resource-based access policy is attached directly to the AgentCore Runtime. It explicitly allows only the API Gateway Proxy Lambda's execution role to invoke the runtime, and denies all other principals. Even if an attacker bypasses the API Gateway layer, they cannot directly call the AgentCore Runtime without the correct IAM credentials.
+A resource-based access policy is attached directly to the AgentCore Runtime. It explicitly allows only the API Gateway Proxy Lambda's execution role to invoke the runtime, and denies all other principals.
 
 ## Cleanup
 
