@@ -16,7 +16,10 @@ import {
 } from "@aws-sdk/client-bedrock-agentcore";
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 
-const RUNTIME_ARN = process.env.RUNTIME_ARN!;
+const RUNTIME_ARN = process.env.RUNTIME_ARN;
+if (!RUNTIME_ARN) {
+  throw new Error("RUNTIME_ARN environment variable is required");
+}
 const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || "")
   .split(",")
   .map((o) => o.trim())
@@ -41,7 +44,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     parsed = JSON.parse(bodyStr);
     console.log(`MCP method: ${parsed.method || "unknown"} | id: ${parsed.id || "none"}`);
   } catch (e) {
-    console.log(`Invalid JSON body: ${bodyStr.slice(0, 200)}`);
+    console.error("JSON parse error:", e);
     return {
       statusCode: 400,
       headers: {
@@ -51,7 +54,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: null,
-        error: { code: -32700, message: `Parse error: ${String(e)}` },
+        error: { code: -32700, message: "Parse error" },
       }),
     };
   }
@@ -158,7 +161,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: (parsed as any).id || 1,
-        error: { code: -32603, message: `Internal error: ${String(e)}` },
+        error: { code: -32603, message: "Internal error" },
       }),
     };
   }

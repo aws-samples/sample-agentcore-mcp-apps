@@ -23,6 +23,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import crypto from "crypto";
 import {
   registerAppTool,
   registerAppResource,
@@ -329,7 +330,11 @@ app.post("/mcp", async (req, res) => {
     transport = transports.get(sessionId)!;
   } else {
     transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => `session-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      sessionIdGenerator: () => {
+        const timestamp = Date.now();
+        const randomBytes = crypto.randomBytes(16).toString('hex');
+        return `session-${timestamp}-${randomBytes}`;
+      },
       onsessioninitialized: (newSessionId) => {
         transports.set(newSessionId, transport);
       },
