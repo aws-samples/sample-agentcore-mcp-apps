@@ -2,12 +2,12 @@
  * CDK Stack for deploying the Unicorn Rentals MCP Server on AgentCore Runtime.
  *
  * Resources created:
- *   1. S3 + CloudFront for widget hosting
+ *   1. S3 + CloudFront for image hosting
  *   2. S3 bucket for MCP server deployment package
  *   3. DynamoDB tables for unicorn and booking data
  *   4. IAM Role for AgentCore Runtime
- *   5. AgentCore Runtime (MCP Server) via direct code deploy
- *   6. Lambda proxy function + Resource-based policy on Runtime
+ *   5. AgentCore Runtime (MCP Server) via direct code deploy (Node.js 22)
+ *   6. Lambda proxy function (Node.js) + Resource-based policy on Runtime
  *   7. API Gateway for ChatGPT connector
  *   8. WAF Web ACL — ChatGPT IP allowlist + AWS Managed Rules
  */
@@ -42,11 +42,11 @@ export class AgentCoreMcpStack extends cdk.Stack {
     const corsAllowedOriginsParam = new cdk.CfnParameter(this, "CorsAllowedOrigins", {
       type: "String",
       description: "Comma-separated list of allowed CORS origins",
-      default: "https://chatgpt.com,https://chat.openai.com,http://localhost:8000",
+      default: "https://chatgpt.com,https://chat.openai.com,https://claude.ai,https://www.claude.ai,http://localhost:8000",
     });
 
     // ----------------------------------------------------------------
-    // 1. S3 + CloudFront for Widgets
+    // 1. S3 + CloudFront for Images
     // ----------------------------------------------------------------
     const widgetsBucket = new s3.Bucket(this, "WidgetsBucket", {
       bucketName: `${project}-widgets-${this.account}`,
@@ -95,6 +95,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
       ],
       destinationBucket: deploymentBucket,
       destinationKeyPrefix: "mcp-server",
+      prune: true, // Delete old objects when new ones are deployed
     });
 
     // ----------------------------------------------------------------
@@ -285,16 +286,13 @@ export class AgentCoreMcpStack extends cdk.Stack {
     );
 
     // ----------------------------------------------------------------
-    // 5. AgentCore Runtime (MCP Server) — Direct Code Deploy
+    // 5. AgentCore Runtime (MCP Server) — Direct Code Deploy (Node.js 22)
     // ----------------------------------------------------------------
-    // ----------------------------------------------------------------
-    // NOTE: As of CDK 2.170+, AgentCore resources use CfnResource.
-    // When L2 constructs are available, replace this.
     const agentCoreRuntime = new cdk.CfnResource(this, "McpRuntime", {
       type: "AWS::BedrockAgentCore::Runtime",
       properties: {
         AgentRuntimeName: `${project.replace(/-/g, "_")}_runtime`,
-        Description: `${project} MCP Server on AgentCore Runtime`,
+        Description: `${project} MCP Server on AgentCore Runtime (Node.js)`,
         RoleArn: agentCoreRole.roleArn,
         AgentRuntimeArtifact: {
           CodeConfiguration: {
@@ -304,8 +302,8 @@ export class AgentCoreMcpStack extends cdk.Stack {
                 Prefix: mcpServerZipKey,
               },
             },
-            EntryPoint: ["main.py"],
-            Runtime: "PYTHON_3_13",
+            EntryPoint: ["main.js"],
+            Runtime: "NODE_22",
           },
         },
         NetworkConfiguration: {
@@ -331,16 +329,14 @@ export class AgentCoreMcpStack extends cdk.Stack {
       },
     });
 
-
-
     // ----------------------------------------------------------------
-    // 6. Lambda Proxy
+    // 6. Lambda Proxy (Node.js)
     // ----------------------------------------------------------------
     const proxyFn = new lambda.Function(this, "ProxyFunction", {
       functionName: `${project}-proxy`,
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: "proxy.lambda_handler",
-      code: lambda.Code.fromAsset(path.join(__dirname, "..", "..", "..", "src", "lambda", "api-gateway-proxy")),
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: "index.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "..", "..", "..", "src", "lambda", "api-gateway-proxy", "dist")),
       timeout: cdk.Duration.seconds(30),
       environment: {
         RUNTIME_ARN: runtimeArn,
@@ -438,7 +434,6 @@ export class AgentCoreMcpStack extends cdk.Stack {
     // ----------------------------------------------------------------
 
     // ChatGPT Actions outbound IP ranges (source: https://openai.com/chatgpt-actions.json)
-    // IMPORTANT: This list changes periodically. Check the URL above for updates.
     const chatGptIpSet = new wafv2.CfnIPSet(this, "ChatGptIpSet", {
       name: `${project}-chatgpt-ips`,
       scope: "REGIONAL",
@@ -496,6 +491,16 @@ export class AgentCoreMcpStack extends cdk.Stack {
       ],
     });
 
+    // Anthropic/Claude outbound IP ranges (source: https://docs.anthropic.com/claude/reference/ip-addresses)
+    const claudeIpSet = new wafv2.CfnIPSet(this, "ClaudeIpSet", {
+      name: `${project}-claude-ips`,
+      scope: "REGIONAL",
+      ipAddressVersion: "IPV4",
+      addresses: [
+        "160.79.104.0/21",
+      ],
+    });
+
     // Web ACL with IP allowlist + AWS Managed Rules for common threats
     const webAcl = new wafv2.CfnWebACL(this, "ApiWafAcl", {
       name: `${project}-api-waf`,
@@ -507,7 +512,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
         sampledRequestsEnabled: true,
       },
       rules: [
-        // Rule 1: Allow only ChatGPT IPs
+        // Rule 1: Allow ChatGPT IPs
         {
           name: "AllowChatGptIPs",
           priority: 1,
@@ -523,10 +528,26 @@ export class AgentCoreMcpStack extends cdk.Stack {
             sampledRequestsEnabled: true,
           },
         },
-        // Rule 2: AWS Managed Rules — Common Rule Set (blocks known bad inputs)
+        // Rule 2: Allow Claude/Anthropic IPs
+        {
+          name: "AllowClaudeIPs",
+          priority: 2,
+          action: { allow: {} },
+          statement: {
+            ipSetReferenceStatement: {
+              arn: claudeIpSet.attrArn,
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: `${project}-claude-ip-allow`,
+            sampledRequestsEnabled: true,
+          },
+        },
+        // Rule 3: AWS Managed Rules — Common Rule Set
         {
           name: "AWSManagedRulesCommonRuleSet",
-          priority: 2,
+          priority: 3,
           overrideAction: { none: {} },
           statement: {
             managedRuleGroupStatement: {
@@ -540,10 +561,10 @@ export class AgentCoreMcpStack extends cdk.Stack {
             sampledRequestsEnabled: true,
           },
         },
-        // Rule 3: AWS Managed Rules — Known Bad Inputs (Log4j, etc.)
+        // Rule 4: AWS Managed Rules — Known Bad Inputs
         {
           name: "AWSManagedRulesKnownBadInputsRuleSet",
-          priority: 3,
+          priority: 4,
           overrideAction: { none: {} },
           statement: {
             managedRuleGroupStatement: {
@@ -557,10 +578,10 @@ export class AgentCoreMcpStack extends cdk.Stack {
             sampledRequestsEnabled: true,
           },
         },
-        // Rule 4: Rate limiting — 1000 requests per 5 minutes per IP
+        // Rule 5: Rate limiting — 1000 requests per 5 minutes per IP
         {
           name: "RateLimitRule",
-          priority: 4,
+          priority: 5,
           action: { block: {} },
           statement: {
             rateBasedStatement: {
@@ -591,7 +612,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
       value: `${api.url}mcp`,
     });
     new cdk.CfnOutput(this, "WidgetBaseUrl", {
-      description: "CloudFront URL for widgets",
+      description: "CloudFront URL for images",
       value: `https://${widgetsCdn.domainName}`,
     });
     new cdk.CfnOutput(this, "RuntimeArn", {
