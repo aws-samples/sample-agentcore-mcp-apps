@@ -1,0 +1,32 @@
+{
+  "name": "unicorn-rentals-mcp-server",
+  "version": "1.0.0",
+  "description": "Unicorn Rentals MCP Server for AgentCore Runtime",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "cross-env NODE_ENV=development concurrently \"cross-env INPUT=src/widgets/unicorn-list.html vite build --watch\" \"tsx --watch src/main.ts\"",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.700.0",
+    "@modelcontextprotocol/ext-apps": "^1.7.3",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "concurrently": "^9.0.0",
+    "cross-env": "^7.0.3",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}
