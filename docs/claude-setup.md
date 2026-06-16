@@ -163,7 +163,7 @@ See [widget-rendering.md](widget-rendering.md) for the full technical explanatio
 
 The API Gateway is protected by a WAF with an IP allowlist. Both ChatGPT's outbound IPs (`chatGptIpSet`) and Anthropic/Claude's outbound IPs are already included by default, so Claude (via claude.ai) and ChatGPT can reach the endpoint without any changes.
 
-> **Important:** The ChatGPT outbound IP ranges may change over time. Always check the latest values from [OpenAI's official documentation](https://platform.openai.com/docs/actions/production#ip-egress-ranges) before deploying to production.
+> **Important:** The ChatGPT outbound IP ranges may change over time. Always check the latest values from OpenAI's official documentation before deploying to production.
 
 ### For development/demo
 
@@ -199,7 +199,7 @@ npx cdk deploy
 
 | Problem | Solution |
 |---------|----------|
-| **403 Forbidden** | Your IP isn't in the WAF allowlist  See WAF Considerations above. |
+| **403 Forbidden** | Your IP isn't in the WAF allowlist. See WAF Considerations above. |
 | **Widgets not rendering** | Ensure you're using claude.ai or Claude Desktop (not Claude Code). Check that the MCP server returns `_meta` with `ui.resourceUri` on tool results. |
 | **Connection timeout** | Verify the API Gateway URL is correct and the stack is deployed. Try `curl -X POST <url>`. |
 | **Tools not appearing** | In Claude Desktop: restart after config change, check logs via **Help > Debug > MCP**. On claude.ai: ensure connector is enabled for the conversation. |
