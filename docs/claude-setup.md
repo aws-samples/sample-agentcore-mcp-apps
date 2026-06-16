@@ -25,9 +25,9 @@ https://abc123.execute-api.us-east-1.amazonaws.com/prod/mcp
 ### 2. Add as a Custom Connector
 
 1. Open [claude.ai](https://claude.ai)
-2. Go to **Settings > Connectors**
-3. Click **Add custom connector**
-4. Enter your `McpEndpointUrl` as the server URL
+2. Go to **Customize > Connectors**
+3. Click **Add connector**
+4. Enter your `McpEndpointUrl` as the remote MCP server URL
 5. Give it a name (e.g. "Unicorn Rentals")
 6. Save
 
@@ -51,6 +51,8 @@ Book the Zephyr unicorn for me (customer ID: demo-user-1)
 > **Note:** Claude doesn't automatically provide a user identity like ChatGPT does via `openai/subject`. You need to provide a `customer_id` explicitly (any string — it's used to track bookings per user).
 
 ## Option B: Claude Desktop
+
+> **WAF Note:** Claude Desktop connects from your local machine's IP, not from Anthropic's servers. You must add your outbound IP to the WAF allowlist for requests to succeed. See [WAF Considerations](#waf-considerations) below.
 
 ### 1. Update Claude Desktop config
 
@@ -86,6 +88,8 @@ The same prompts work here. Widget cards render inline when tools return structu
 
 Claude Code connects to remote MCP servers but renders text-only responses (no widget iframe support in the terminal). The tools are still fully functional.
 
+> **WAF Note:** Claude Code connects from your local machine's IP. You must add your outbound IP to the WAF allowlist. See [WAF Considerations](#waf-considerations) below.
+
 Add to your project's `.mcp.json`:
 
 ```json
@@ -104,6 +108,8 @@ Then start Claude Code — it will discover the tools automatically.
 ## Option D: Anthropic API with Tool Use
 
 You can call the deployed MCP server programmatically via the Anthropic API's tool use feature.
+
+> **WAF Note:** Requests originate from wherever you run this script. Add your outbound IP to the WAF allowlist. See [WAF Considerations](#waf-considerations) below.
 
 ```python
 import json
@@ -151,34 +157,33 @@ for block in response.content:
 
 ## How Widget Rendering Works (Technical)
 
-The MCP server implements the **MCP Apps** extension:
-
-1. Tools declare `_meta.ui.resourceUri` (e.g. `ui://widget/unicorn-list.html`)
-2. Resources at those `ui://` URIs serve HTML with MIME type `text/html;profile=mcp-app`
-3. When Claude/ChatGPT calls a tool that has a `resourceUri`, it also fetches the widget HTML via `resources/read`
-4. The client renders the HTML in a **sandboxed iframe** and sends the tool's `structuredContent` to the iframe via `postMessage` (JSON-RPC format)
-5. The widget JavaScript listens for the message and renders the data
-
-The widgets in this project handle both protocols for maximum compatibility:
-- **MCP Apps standard** (`postMessage` with JSON-RPC `structuredContent`) — works with Claude and any MCP Apps-compatible client
-- **ChatGPT legacy** (`window.openai.toolOutput` polling) — fallback for older ChatGPT behaviour
+See [widget-rendering.md](widget-rendering.md) for the full technical explanation of how MCP Apps widgets are rendered across clients.
 
 ## WAF Considerations
 
-The API Gateway is protected by a WAF that only allows ChatGPT's outbound IPs by default. To use with Claude, you need to add additional IPs.
+The API Gateway is protected by a WAF with an IP allowlist. Both ChatGPT's outbound IPs (`chatGptIpSet`) and Anthropic/Claude's outbound IPs are already included by default, so Claude (via claude.ai) and ChatGPT can reach the endpoint without any changes.
+
+> **Important:** The ChatGPT outbound IP ranges may change over time. Always check the latest values from [OpenAI's official documentation](https://platform.openai.com/docs/actions/production#ip-egress-ranges) before deploying to production.
 
 ### For development/demo
 
-Add your IP (or `0.0.0.0/1` + `128.0.0.0/1` to allow all traffic temporarily) to the `chatGptIpSet` in `infrastructure/cdk/lib/agentcore-mcp-stack.ts`, then redeploy:
+To test from your own machine (Claude Desktop, Claude Code, or the Anthropic API), you need to add your machine's **outbound IP** to the WAF allowlist. Find your outbound IP (e.g. via `curl ifconfig.me`) and then either:
+
+**Option 1: Update the CDK stack and redeploy**
+
+Add your IP to the `claudeIpSet` addresses array in `infrastructure/cdk/lib/agentcore-mcp-stack.ts`:
 
 ```bash
 cd infrastructure/cdk
 npx cdk deploy
 ```
 
-### For production
+**Option 2: Add the IP directly in the AWS WAF console**
 
-Add a separate IP set with Anthropic's outbound IPs, or replace the WAF IP allowlist with API key-based authentication (e.g. a custom header validated in the Lambda proxy).
+1. Open the [AWS WAF console](https://console.aws.amazon.com/wafv2/)
+2. Navigate to **IP sets** (Regional)
+3. Select the `unicorn-mcp-claude-ips` IP set
+4. Click **Add IP address** and enter your outbound IP in CIDR notation (e.g. `203.0.113.42/32`)
 
 ## Differences from ChatGPT
 
@@ -194,7 +199,7 @@ Add a separate IP set with Anthropic's outbound IPs, or replace the WAF IP allow
 
 | Problem | Solution |
 |---------|----------|
-| **403 Forbidden** | Your IP (or Claude's outbound IP) isn't in the WAF allowlist. See WAF Considerations above. |
+| **403 Forbidden** | Your IP isn't in the WAF allowlist  See WAF Considerations above. |
 | **Widgets not rendering** | Ensure you're using claude.ai or Claude Desktop (not Claude Code). Check that the MCP server returns `_meta` with `ui.resourceUri` on tool results. |
 | **Connection timeout** | Verify the API Gateway URL is correct and the stack is deployed. Try `curl -X POST <url>`. |
 | **Tools not appearing** | In Claude Desktop: restart after config change, check logs via **Help > Debug > MCP**. On claude.ai: ensure connector is enabled for the conversation. |
