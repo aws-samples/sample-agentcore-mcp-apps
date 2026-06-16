@@ -1,145 +1,134 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile>
-<diagram name="Unicorn Rentals - AgentCore MCP Architecture" id="arch-unicorn-rentals">
-<mxGraphModel dx="1400" dy="820" grid="1" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="820">
+<diagram name="AgentCore MCP Apps Architecture" id="arch-unicorn-rentals">
+<mxGraphModel dx="1080" dy="580" grid="1" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1080" pageHeight="560">
 <root>
 <mxCell id="0"/>
 <mxCell id="1" parent="0"/>
 
 <!-- TITLE -->
-<mxCell id="title" value="AgentCore MCP Apps — Unicorn Rentals Demo" style="text;html=1;fontSize=14;fontStyle=1;fontColor=#232F3E;align=left;verticalAlign=middle;" vertex="1" parent="1">
-  <mxGeometry x="30" y="15" width="550" height="25" as="geometry"/>
+<mxCell id="title" value="AgentCore MCP Apps — Unicorn Rentals" style="text;html=1;fontSize=13;fontStyle=1;fontColor=#232F3E;align=left;verticalAlign=middle;" vertex="1" parent="1">
+  <mxGeometry x="20" y="12" width="500" height="22" as="geometry"/>
 </mxCell>
 
 <!-- EXTERNAL ACTORS -->
 <mxCell id="user" value="User" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#232F3E;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.users;" vertex="1" parent="1">
-  <mxGeometry x="40" y="260" width="50" height="50" as="geometry"/>
+  <mxGeometry x="20" y="210" width="46" height="46" as="geometry"/>
 </mxCell>
 
-<mxCell id="chatgpt" value="ChatGPT" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#10A37F;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=1;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.general_saml_token;" vertex="1" parent="1">
-  <mxGeometry x="160" y="260" width="50" height="50" as="geometry"/>
+<mxCell id="chatgpt" value="MCP Host&#xa;(ChatGPT / Claude)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#232F3E;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=1;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;" vertex="1" parent="1">
+  <mxGeometry x="110" y="210" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- AWS CLOUD GROUP -->
-<mxCell id="aws-cloud" value="AWS Cloud" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=1;fontColor=#232F3E;verticalAlign=top;align=left;spacingLeft=30;spacingTop=4;dashed=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_aws_cloud;strokeColor=#232F3E;fillColor=none;" vertex="1" parent="1">
-  <mxGeometry x="280" y="55" width="1080" height="740" as="geometry"/>
+<mxCell id="aws-cloud" value="AWS Cloud" style="points=[[0,0],[0.25,0],[0.5,0],[0.75,0],[1,0],[1,0.25],[1,0.5],[1,0.75],[1,1],[0.75,1],[0.5,1],[0.25,1],[0,1],[0,0.75],[0,0.5],[0,0.25]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=1;fontColor=#232F3E;verticalAlign=top;align=left;spacingLeft=28;spacingTop=4;dashed=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_aws_cloud;strokeColor=#232F3E;fillColor=none;" vertex="1" parent="1">
+  <mxGeometry x="195" y="60" width="855" height="470" as="geometry"/>
 </mxCell>
 
 <!-- WAF -->
-<mxCell id="waf" value="AWS WAF&#xa;(IP Allowlist + Rate Limit)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#F54749;gradientDirection=north;fillColor=#C7131F;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.waf;" vertex="1" parent="1">
-  <mxGeometry x="340" y="130" width="50" height="50" as="geometry"/>
+<mxCell id="waf" value="AWS WAF" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#F54749;gradientDirection=north;fillColor=#C7131F;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.waf;" vertex="1" parent="1">
+  <mxGeometry x="247" y="110" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- API Gateway -->
-<mxCell id="apigw" value="API Gateway&#xa;(POST /mcp)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#945DF2;gradientDirection=north;fillColor=#5A30B5;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;" vertex="1" parent="1">
-  <mxGeometry x="340" y="260" width="50" height="50" as="geometry"/>
+<mxCell id="apigw" value="API Gateway&#xa;(POST /mcp)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#945DF2;gradientDirection=north;fillColor=#5A30B5;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;" vertex="1" parent="1">
+  <mxGeometry x="247" y="210" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- Proxy Lambda -->
-<mxCell id="proxy-lambda" value="Proxy Lambda&#xa;(Python 3.12)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#F78E04;gradientDirection=north;fillColor=#D05C17;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="1">
-  <mxGeometry x="530" y="260" width="50" height="50" as="geometry"/>
+<mxCell id="proxy-lambda" value="Proxy Lambda&#xa;(Node.js)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#F78E04;gradientDirection=north;fillColor=#D05C17;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="1">
+  <mxGeometry x="395" y="210" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- AgentCore Runtime -->
-<mxCell id="agentcore" value="Bedrock AgentCore&#xa;Runtime&#xa;(MCP Server — Python 3.13)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#4AB29A;gradientDirection=north;fillColor=#1F8B6C;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=1;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.bedrock;" vertex="1" parent="1">
-  <mxGeometry x="730" y="260" width="50" height="50" as="geometry"/>
+<mxCell id="agentcore" value="AgentCore Runtime&#xa;MCP Server (Node.js)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#4AB29A;gradientDirection=north;fillColor=#1F8B6C;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=1;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.bedrock;" vertex="1" parent="1">
+  <mxGeometry x="550" y="210" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- Service Lambda -->
-<mxCell id="service-lambda" value="Unicorn Service&#xa;Lambda&#xa;(Python 3.12)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#F78E04;gradientDirection=north;fillColor=#D05C17;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="1">
-  <mxGeometry x="930" y="260" width="50" height="50" as="geometry"/>
+<mxCell id="service-lambda" value="Unicorn Service&#xa;Lambda (Python)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#F78E04;gradientDirection=north;fillColor=#D05C17;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="1">
+  <mxGeometry x="710" y="210" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- DynamoDB Unicorns -->
-<mxCell id="ddb-unicorns" value="DynamoDB&#xa;(Unicorns)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#4D72F3;gradientDirection=north;fillColor=#3334B9;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;" vertex="1" parent="1">
-  <mxGeometry x="1130" y="200" width="50" height="50" as="geometry"/>
+<mxCell id="ddb-unicorns" value="DynamoDB&#xa;(Unicorns)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#4D72F3;gradientDirection=north;fillColor=#3334B9;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;" vertex="1" parent="1">
+  <mxGeometry x="870" y="150" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- DynamoDB Bookings -->
-<mxCell id="ddb-bookings" value="DynamoDB&#xa;(Bookings)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#4D72F3;gradientDirection=north;fillColor=#3334B9;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;" vertex="1" parent="1">
-  <mxGeometry x="1130" y="330" width="50" height="50" as="geometry"/>
+<mxCell id="ddb-bookings" value="DynamoDB&#xa;(Bookings)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#4D72F3;gradientDirection=north;fillColor=#3334B9;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.dynamodb;" vertex="1" parent="1">
+  <mxGeometry x="870" y="275" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- CloudFront -->
-<mxCell id="cloudfront" value="CloudFront" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#945DF2;gradientDirection=north;fillColor=#5A30B5;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudfront;" vertex="1" parent="1">
-  <mxGeometry x="530" y="530" width="50" height="50" as="geometry"/>
+<mxCell id="cloudfront" value="CloudFront" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#945DF2;gradientDirection=north;fillColor=#5A30B5;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudfront;" vertex="1" parent="1">
+  <mxGeometry x="395" y="400" width="46" height="46" as="geometry"/>
 </mxCell>
 
-<!-- S3 Widgets -->
-<mxCell id="s3-widgets" value="S3&#xa;(Widgets + Images)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#60A337;gradientDirection=north;fillColor=#277116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
-  <mxGeometry x="730" y="530" width="50" height="50" as="geometry"/>
+<!-- S3 Images -->
+<mxCell id="s3-widgets" value="S3 (Images)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#60A337;gradientDirection=north;fillColor=#277116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
+  <mxGeometry x="550" y="400" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- S3 Deployment -->
-<mxCell id="s3-deploy" value="S3&#xa;(MCP Server ZIP)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#60A337;gradientDirection=north;fillColor=#277116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
-  <mxGeometry x="730" y="680" width="50" height="50" as="geometry"/>
+<mxCell id="s3-deploy" value="S3 (Server ZIP)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=#60A337;gradientDirection=north;fillColor=#277116;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
+  <mxGeometry x="710" y="400" width="46" height="46" as="geometry"/>
 </mxCell>
 
 <!-- Resource-based policy annotation -->
-<mxCell id="rbp-note" value="Resource-Based Policy:&#xa;Deny all except Proxy Lambda" style="shape=note2;boundedLbl=1;whiteSpace=wrap;html=1;size=8;verticalAlign=middle;align=center;fontSize=8;fontColor=#C7131F;fillColor=#FFF0F0;strokeColor=#C7131F;strokeWidth=1;" vertex="1" parent="1">
-  <mxGeometry x="680" y="130" width="150" height="40" as="geometry"/>
+<mxCell id="rbp-note" value="Resource-Based Policy:&#xa;only Proxy Lambda may invoke" style="shape=note2;boundedLbl=1;whiteSpace=wrap;html=1;size=8;verticalAlign=middle;align=center;fontSize=8;fontColor=#C7131F;fillColor=#FFF0F0;strokeColor=#C7131F;strokeWidth=1;" vertex="1" parent="1">
+  <mxGeometry x="520" y="105" width="160" height="36" as="geometry"/>
 </mxCell>
 
 <!-- ================================================================ -->
 <!-- EDGES — PRIMARY REQUEST FLOW -->
 <!-- ================================================================ -->
 
-<!-- User → ChatGPT -->
 <mxCell id="e1" value="① Prompt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#232F3E;endArrow=blockThin;endFill=1;fontSize=9;fontColor=#232F3E;labelBackgroundColor=#FFFFFF;" edge="1" source="user" target="chatgpt" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<!-- ChatGPT → API Gateway -->
 <mxCell id="e2" value="② POST /mcp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#5A30B5;endArrow=blockThin;endFill=1;fontSize=9;fontColor=#5A30B5;labelBackgroundColor=#FFFFFF;" edge="1" source="chatgpt" target="apigw" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<!-- API Gateway → Proxy Lambda -->
 <mxCell id="e3" value="③ Invoke" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#D05C17;endArrow=blockThin;endFill=1;fontSize=9;fontColor=#D05C17;labelBackgroundColor=#FFFFFF;" edge="1" source="apigw" target="proxy-lambda" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<!-- Proxy Lambda → AgentCore Runtime -->
 <mxCell id="e4" value="④ InvokeAgentRuntime" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#1F8B6C;endArrow=blockThin;endFill=1;fontSize=9;fontColor=#1F8B6C;labelBackgroundColor=#FFFFFF;" edge="1" source="proxy-lambda" target="agentcore" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<!-- AgentCore → Service Lambda -->
 <mxCell id="e5" value="⑤ Invoke" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#D05C17;endArrow=blockThin;endFill=1;fontSize=9;fontColor=#D05C17;labelBackgroundColor=#FFFFFF;" edge="1" source="agentcore" target="service-lambda" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<!-- Service Lambda → DynamoDB Unicorns -->
 <mxCell id="e6" value="⑥ Read/Write" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#3334B9;endArrow=blockThin;endFill=1;fontSize=9;fontColor=#3334B9;labelBackgroundColor=#FFFFFF;" edge="1" source="service-lambda" target="ddb-unicorns" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<!-- Service Lambda → DynamoDB Bookings -->
 <mxCell id="e7" value="⑦ Read/Write" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#3334B9;endArrow=blockThin;endFill=1;fontSize=9;fontColor=#3334B9;labelBackgroundColor=#FFFFFF;" edge="1" source="service-lambda" target="ddb-bookings" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
-<!-- ChatGPT → CloudFront (widget fetch) -->
-<mxCell id="e8" value="⑧ Fetch widget" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#5A30B5;endArrow=blockThin;endFill=1;dashed=1;fontSize=9;fontColor=#5A30B5;labelBackgroundColor=#FFFFFF;" edge="1" source="chatgpt" target="cloudfront" parent="1">
+<!-- MCP Host → CloudFront (image fetch) -->
+<mxCell id="e8" value="⑧ Fetch images" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#5A30B5;endArrow=blockThin;endFill=1;dashed=1;fontSize=9;fontColor=#5A30B5;labelBackgroundColor=#FFFFFF;" edge="1" source="chatgpt" target="cloudfront" parent="1">
   <mxGeometry relative="1" as="geometry">
     <Array as="points">
-      <mxPoint x="185" y="555"/>
+      <mxPoint x="133" y="423"/>
     </Array>
   </mxGeometry>
 </mxCell>
 
-<!-- CloudFront → S3 Widgets -->
+<!-- CloudFront → S3 Images -->
 <mxCell id="e9" value="Origin" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#277116;endArrow=blockThin;endFill=1;dashed=1;fontSize=9;fontColor=#277116;labelBackgroundColor=#FFFFFF;" edge="1" source="cloudfront" target="s3-widgets" parent="1">
   <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
 <!-- S3 Deploy → AgentCore (code artifact) -->
 <mxCell id="e10" value="Code deploy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1;strokeColor=#277116;endArrow=blockThin;endFill=1;dashed=1;fontSize=9;fontColor=#277116;labelBackgroundColor=#FFFFFF;" edge="1" source="s3-deploy" target="agentcore" parent="1">
-  <mxGeometry relative="1" as="geometry">
-    <Array as="points">
-      <mxPoint x="755" y="440"/>
-    </Array>
-  </mxGeometry>
+  <mxGeometry relative="1" as="geometry"/>
 </mxCell>
 
 <!-- WAF → API Gateway -->
