@@ -44,3 +44,4 @@ build/
 
 # Blog drafts and working assets (not part of the open-source sample)
 blog-assets/
+.slack-messages/
