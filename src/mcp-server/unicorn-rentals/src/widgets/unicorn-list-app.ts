@@ -1,3 +1,5 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: MIT-0
 import { App } from "@modelcontextprotocol/ext-apps";
 
 const root = document.getElementById('root')!;
