@@ -1,3 +1,5 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: MIT-0
 /**
  * Build script for the API Gateway proxy Lambda.
  * Bundles into a single file for Lambda deployment.
