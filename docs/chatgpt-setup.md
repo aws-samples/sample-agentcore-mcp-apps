@@ -76,13 +76,7 @@ ChatGPT will call `return_unicorn` and show the final invoice — duration, hour
 
 ## Step 4: Verify Widgets Render
 
-When tools execute, ChatGPT renders your widget HTML inside an iframe. The data flow is:
-
-1. MCP server returns `structuredContent` (data) + `_meta` with widget resource URI
-2. ChatGPT sends a `resources/read` request for the widget URI
-3. MCP server returns the widget HTML
-4. ChatGPT renders the HTML in an iframe, injecting `structuredContent` via `window.openai.toolOutput`
-5. The widget renders the data as a rich UI card
+When tools execute, ChatGPT renders your widget HTML inside an iframe. See [widget-rendering.md](widget-rendering.md) for the full technical explanation of the data flow.
 
 If widgets aren't rendering, verify:
 - Your CloudFront distribution is accessible: `curl -I https://<your-cloudfront-domain>/images/stardust.png`
@@ -99,7 +93,9 @@ After making changes to your MCP server (adding tools, changing descriptions):
 
 ## Testing Without ChatGPT
 
-You can verify the MCP server works before connecting to ChatGPT:
+You can verify the MCP server works before connecting to ChatGPT.
+
+> **Important:** The API Gateway is protected by a WAF that only allows specific IP addresses. Before testing, add your machine's outbound IP to the WAF IP set — either by updating the `allowedIpSet` in the CDK stack and redeploying, or by adding the IP directly in the AWS WAF console. Without this, all requests from non-allowlisted IPs will receive a 403 Forbidden response.
 
 ### Option A: MCP Inspector
 ```bash
@@ -111,24 +107,31 @@ npx @modelcontextprotocol/inspector@latest
 ```bash
 MCP_URL="https://<your-api-gateway>/prod/mcp"
 
-# Initialize
+# Initialize — capture the Mcp-Session-Id from the response header
 curl -s -X POST "$MCP_URL" \
   -H "Content-Type: application/json" \
+  -D - \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
+
+# Copy the Mcp-Session-Id value from the response headers above
+SESSION_ID="<paste-session-id-here>"
 
 # List tools
 curl -s -X POST "$MCP_URL" \
   -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: $SESSION_ID" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 
 # Call list_unicorns
 curl -s -X POST "$MCP_URL" \
   -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: $SESSION_ID" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_unicorns","arguments":{"unicorn_type":"all"}}}'
 
 # Call book_unicorn
 curl -s -X POST "$MCP_URL" \
   -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: $SESSION_ID" \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"book_unicorn","arguments":{"unicorn_id":"uc-001","customer_id":"demo-user-1"}}}'
 ```
 
