@@ -1,3 +1,5 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: MIT-0
 /**
  * Build script:
  * 1. Bundles widget HTML files with Vite (inlines the @modelcontextprotocol/ext-apps SDK)
