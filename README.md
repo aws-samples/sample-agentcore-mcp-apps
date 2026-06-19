@@ -9,6 +9,8 @@ The sample implements **Unicorn Rentals** — a conversational rental service wi
 - **View active rental** — Monitor the current booking status and elapsed time
 - **Return a unicorn** — End the rental and receive an automatic duration-based invoice
 
+> **Disclaimer:** This sample is provided for demonstration purposes and is not intended for production use without further security hardening, testing, and review appropriate to your environment.
+
 ---
 
 This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server with [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) on [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) and connect it to AI hosts (ChatGPT, Claude, etc.) with rich interactive widget UI.
