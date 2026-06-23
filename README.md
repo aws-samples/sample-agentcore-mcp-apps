@@ -94,15 +94,17 @@ A single build script handles both the API Gateway Proxy Lambda and MCP Server p
 
 ```bash
 chmod +x build.sh
-./build.sh
+./build.sh --clean
 ```
 
 This script:
 1. Builds the API Gateway Proxy Lambda (`src/lambda/api-gateway-proxy/dist/index.mjs`)
-2. Installs MCP server dependencies (clean install)
+2. Installs MCP server dependencies (clean install via `--clean` flag for reproducible builds)
 3. Bundles widget HTML files with Vite using `vite-plugin-singlefile` (inlines the MCP Apps SDK so widgets work on any host without external CDN dependencies)
 4. Bundles the Node.js server with esbuild into a single `main.js`
 5. Packages everything into `build/mcp-server-deployment.zip`
+
+The `--clean` flag removes `node_modules` and `package-lock.json` before installing, ensuring a reproducible build. Omit it for faster local iteration when dependencies haven't changed.
 
 The build output is pure JavaScript — no native modules — so it runs on ARM64 AgentCore Runtime regardless of the build host architecture.
 
