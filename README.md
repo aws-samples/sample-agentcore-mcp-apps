@@ -88,40 +88,32 @@ This project demonstrates a clean separation between the **MCP protocol layer** 
 - Node.js 22+ (for MCP server, proxy Lambda, and AWS CDK)
 - AWS CDK CLI installed globally: `npm install -g aws-cdk`
 
-### Step 1: Build the Proxy Lambda
+### Step 1: Build All Artifacts
+
+A single build script handles both the API Gateway Proxy Lambda and MCP Server packaging:
 
 ```bash
-cd src/lambda/api-gateway-proxy
-npm install
-npm run build
-cd ../../..
-```
-
-This produces `src/lambda/api-gateway-proxy/dist/index.mjs`.
-
-### Step 2: Package the MCP Server
-
-```bash
-chmod +x src/scripts/package-mcp-server.sh
-./src/scripts/package-mcp-server.sh
+chmod +x build.sh
+./build.sh
 ```
 
 This script:
-1. Installs dependencies (clean install)
-2. Bundles widget HTML files with Vite using `vite-plugin-singlefile` (inlines the MCP Apps SDK so widgets work on any host without external CDN dependencies)
-3. Bundles the Node.js server with esbuild into a single `main.js`
-4. Packages everything into `build/mcp-server-deployment.zip`
+1. Builds the API Gateway Proxy Lambda (`src/lambda/api-gateway-proxy/dist/index.mjs`)
+2. Installs MCP server dependencies (clean install)
+3. Bundles widget HTML files with Vite using `vite-plugin-singlefile` (inlines the MCP Apps SDK so widgets work on any host without external CDN dependencies)
+4. Bundles the Node.js server with esbuild into a single `main.js`
+5. Packages everything into `build/mcp-server-deployment.zip`
 
 The build output is pure JavaScript — no native modules — so it runs on ARM64 AgentCore Runtime regardless of the build host architecture.
 
-### Step 3: Install CDK Dependencies
+### Step 2: Install CDK Dependencies
 
 ```bash
 cd infrastructure/cdk
 npm install
 ```
 
-### Step 4: Bootstrap CDK (first time only)
+### Step 3: Bootstrap CDK (first time only)
 
 If this is the first time deploying CDK in your AWS account/region, you need to bootstrap:
 
@@ -129,7 +121,7 @@ If this is the first time deploying CDK in your AWS account/region, you need to 
 npx cdk bootstrap
 ```
 
-### Step 5: Synthesize the CloudFormation Template
+### Step 4: Synthesize the CloudFormation Template
 
 Verify the stack synthesizes without errors:
 
@@ -145,7 +137,7 @@ npx cdk synth -c projectName=unicorn-rentals
 
 The default project name is `unicorn-mcp`.
 
-### Step 6: Deploy
+### Step 5: Deploy
 
 ```bash
 npx cdk deploy
@@ -162,33 +154,14 @@ CDK will:
 
 Note the outputs printed after deployment — you'll need the `McpEndpointUrl` to connect an MCP host.
 
-### Step 7: Connect to an MCP Host
+### Step 6: Connect to an MCP Host
 
-#### ChatGPT
+After deployment, connect the MCP endpoint to your preferred host:
 
-1. In ChatGPT, go to **Settings > Apps > Advanced settings** and enable **Developer mode**
-1. Go to **Settings > Apps > Create app**
-1. Set the values -
-   1. `name` : UnicornRentals
-   1. `description` : Allows you to list unicorns, rent unicorns, view rented unicorns and return unicorns
-   1. `McpEndpointUrl` : Get from the CDK output variable "AgentCoreMcpStack.McpEndpointUrl".
-1. Set authentication to None.
-1. Create the App.
-1. After the app gets created, open a new chat, click **+ > More**, select your connector, and try: *"Show me all unicorns"*
+- **ChatGPT** — [ChatGPT Setup Guide](docs/chatgpt-setup.md)
+- **Claude** — [Claude Setup Guide](docs/claude-setup.md)
 
-See the full [ChatGPT Setup Guide](docs/chatgpt-setup.md) for detailed instructions, demo prompts, and troubleshooting.
-
-### Using with Claude
-
-This MCP server uses the **MCP Apps** open standard for widget rendering, which means the same rich interactive UI cards work in both ChatGPT and Claude. Add it as a Custom Connector on claude.ai or configure Claude Desktop — you get the full experience including widget cards. See the [Claude Setup Guide](docs/claude-setup.md) for configuration instructions.
-
-#### Claude
-
-1. In [Claude](https://claude.ai/), click your profile and go to **Settings > Connectors > Add custom connector**
-1. Paste the `McpEndpointUrl` from CDK output
-1. Set authentication to None. 
-1. Create the Connector.
-1. Start a new chat and try: *"Show me all unicorns"*
+Both guides cover configuration steps, demo prompts, and troubleshooting. You'll need the `McpEndpointUrl` from the CDK output.
 
 ## Security
 

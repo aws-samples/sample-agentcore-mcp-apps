@@ -1,0 +1,96 @@
+#!/bin/bash
+# =============================================================================
+# Build Script: Prepares all artifacts for CDK deployment
+#
+# This script handles:
+#   1. Building the API Gateway Proxy Lambda (esbuild bundle)
+#   2. Packaging the MCP Server for AgentCore Runtime (Vite + esbuild + zip)
+#
+# After running this script, deploy with:
+#   cd infrastructure/cdk && npm install && npx cdk deploy
+# =============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+
+# Colors for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}============================================${NC}"
+echo -e "${BLUE}  Building deployment artifacts${NC}"
+echo -e "${BLUE}============================================${NC}"
+echo ""
+
+# =============================================================================
+# Step 1: Build the API Gateway Proxy Lambda
+# =============================================================================
+echo -e "${GREEN}[1/2] Building API Gateway Proxy Lambda...${NC}"
+
+PROXY_DIR="$PROJECT_ROOT/src/lambda/api-gateway-proxy"
+
+cd "$PROXY_DIR"
+npm install --silent
+npm run build
+
+echo "      Output: src/lambda/api-gateway-proxy/dist/index.mjs"
+echo ""
+
+# =============================================================================
+# Step 2: Package the MCP Server
+# =============================================================================
+echo -e "${GREEN}[2/2] Packaging MCP Server for AgentCore Runtime...${NC}"
+
+MCP_SERVER_DIR="$PROJECT_ROOT/src/mcp-server/unicorn-rentals"
+BUILD_DIR="$PROJECT_ROOT/build"
+STAGING_DIR="$BUILD_DIR/deployment_package"
+
+# Clean previous build
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+mkdir -p "$STAGING_DIR"
+
+# Install dependencies (clean install for reproducible builds)
+cd "$MCP_SERVER_DIR"
+rm -rf node_modules package-lock.json
+npm install --silent
+
+# Build the server (Vite widgets + esbuild bundle)
+npm run build
+
+# Stage deployment package
+cp "$MCP_SERVER_DIR/dist/main.js" "$STAGING_DIR/"
+cp -r "$MCP_SERVER_DIR/dist/widgets" "$STAGING_DIR/widgets"
+
+# Minimal package.json for AgentCore Runtime
+cat > "$STAGING_DIR/package.json" << 'EOF'
+{
+  "name": "unicorn-rentals-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "main.js"
+}
+EOF
+
+# Create deployment zip
+cd "$STAGING_DIR"
+zip -r "$BUILD_DIR/mcp-server-deployment.zip" .
+
+echo "      Output: build/mcp-server-deployment.zip"
+echo ""
+
+# =============================================================================
+# Done
+# =============================================================================
+echo -e "${BLUE}============================================${NC}"
+echo -e "${BLUE}  Build complete!${NC}"
+echo -e "${BLUE}============================================${NC}"
+echo ""
+echo "Next steps:"
+echo "  cd infrastructure/cdk"
+echo "  npm install"
+echo "  npx cdk deploy"
+echo ""
