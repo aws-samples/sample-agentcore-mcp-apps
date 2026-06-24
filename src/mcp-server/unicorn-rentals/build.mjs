@@ -31,7 +31,6 @@ mkdirSync(distWidgetsDir, { recursive: true });
 const widgetInputs = [
   "unicorn-list.html",
   "booking-confirmation.html",
-  "availability.html",
 ];
 
 console.log("Building widgets with Vite...");

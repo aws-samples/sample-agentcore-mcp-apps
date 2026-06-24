@@ -3,6 +3,10 @@
 # SPDX-License-Identifier: MIT-0
 # Package the Node.js MCP server for AgentCore Runtime deployment.
 #
+# Use this script if you've only changed the MCP server and want to rebuild
+# just that component without rebuilding the API Gateway Proxy Lambda.
+# For a full build (proxy + MCP server), use the root build.sh instead.
+#
 # This script:
 # 1. Installs dependencies
 # 2. Builds the TypeScript server with esbuild (bundled into single file)
