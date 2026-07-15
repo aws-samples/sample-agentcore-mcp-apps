@@ -9,6 +9,7 @@ import { AgentCoreMcpStack } from "../lib/agentcore-mcp-stack";
 const app = new cdk.App();
 
 new AgentCoreMcpStack(app, "AgentCoreMcpStack", {
+  description: "AgentCore MCP Server stack for Unicorn Rentals (uksb-y11hag3nx1).",
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
