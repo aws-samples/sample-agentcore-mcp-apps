@@ -25,6 +25,12 @@ This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelc
 
 ## Demo
 
+The full **list unicorns** flow — from a natural-language request to the rendered widget:
+
+![List Unicorns demo](docs/images/listUnicorns.gif)
+
+Individual actions:
+
 | Action | Screenshot |
 |-----------|---------|
 | List Unicorns: | <a href="docs/images/list.png"><img src="docs/images/list.png" width="150" alt="Unicorn List" style="margin-right:10px;" /></a> |
