@@ -79,7 +79,7 @@ You will be able to interact with the app with requests like:
 #### Resource Flow (Widget Rendering)
 1. If the tool has an associated resource URI (for example, ui://widget/unicorn-list), the AI host initiates this phase. Tools without an associated widget such as view_bookings and return_unicorn, return text-only content and skip this phase entirely. 
 1. The host sends an MCP resources/read request for that URI. 
-1. The request reaches the MCP App through the API Gateway and proxy AWS Lambda. 
+1. The request reaches the MCP App through the AgentCore Gateway. 
 1. The MCP App resolves the resource URI and returns the self-contained HTML of the widget. AI host might cache this data for better performance. 
 1. The host renders the HTML in a sandboxed iframe, injecting the structured data from the tool response via the MCP Apps lifecycle. 
 1. The widget fetches the images needed from Amazon CloudFront which uses Amazon S3 as the origin. 
