@@ -13,13 +13,13 @@ The sample implements **Unicorn Rentals** — a conversational rental service wi
 
 ---
 
-This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server with [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) on [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) and connect it to AI hosts (ChatGPT, Claude, etc.) with rich interactive widget UI.
+This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server with [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) on [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html), fronted by [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-core-concepts.html), and connect it to AI hosts (ChatGPT, Claude, etc.) with rich interactive widget UI.
 
 ## Tech Stack
 
 - **MCP Server**: Node.js 22 / TypeScript
 - **Business Logic**: Python Lambda (DynamoDB access)
-- **Proxy Lambda**: Node.js 22 / TypeScript
+- **Gateway**: Amazon Bedrock AgentCore Gateway (MCP protocol, No Auth inbound)
 - **Infrastructure**: AWS CDK (TypeScript)
 - **Runtime**: Amazon Bedrock AgentCore Runtime (NODEJS_22)
 
@@ -45,41 +45,39 @@ You will be able to interact with the app with requests like:
 **How it works:**
 | Component | Purpose |
 |-----------|---------|
-| **MCP Server** (Node.js/TS) | Thin MCP protocol layer — receives JSON-RPC, resolves identity, invokes service Lambda, serves widget HTML as MCP resources |
+| **AgentCore Gateway** | Public MCP endpoint for AI hosts — aggregates MCP targets, handles tool discovery, and enforces WAF rules |
+| **AgentCore Runtime (MCP Server)** | Managed runtime hosting the MCP server (Node.js 22) — handles MCP protocol, tool definitions, structured output, widget resources, and delegates business operations to the service Lambda |
 | **Unicorn Rental Service** (Python) | Lambda function that implements business logic (list, book, view, return unicorns) with DynamoDB access |
-| **AgentCore Runtime** | Managed runtime hosting the MCP server (Node.js 22) |
-| **API Gateway** | Public HTTPS endpoint for MCP hosts to call |
-| **API Gateway Proxy Lambda** (Node.js/TS) | Translates HTTPS from API Gateway into `InvokeAgentRuntime` calls |
-| **S3 + CloudFront** | Serves unicorn images referenced by widgets |
 | **DynamoDB** | Stores unicorn inventory and booking records |
+| **S3 + CloudFront** | Serves unicorn images referenced by widgets |
 
 ### How It Works
 
+#### Registration (Connecting the MCP App to an AI Host)
+
+1. **You provide the App details** to the AI host (ChatGPT, Claude, etc.), including the MCP Server URL — the AgentCore Gateway endpoint.
+2. **The AI host** sends MCP `tools/list` and `resources/list` requests to the Gateway URL to discover available capabilities.
+3. **AgentCore Gateway** forwards the requests to the AgentCore Runtime via the configured MCP Server target (authenticated with IAM SigV4).
+4. **AgentCore Runtime (MCP Server)** receives the requests. The MCP App hosted on it defines MCP tools (e.g., `list_unicorns`, `book_unicorn`) and MCP resources (e.g., widget HTML templates). It responds with the full list of tools and resources.
+5. **The AI host** receives the tool and resource definitions and may cache them for future use, enabling tool invocation and widget rendering in subsequent interactions.
+
 #### Request Flow (Tool Calls)
 
-1. **The MCP host** sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the API Gateway endpoint.
-1. **API Gateway** receives the HTTPS request, applies WAF rules (IP allowlisting, rate limiting, common attack protection), and routes it to the Proxy Lambda.
-1. **API Gateway Proxy Lambda** forwards the request to AgentCore Runtime.
-1. **AgentCore Runtime (MCP Server)** receives the MCP request, resolves customer identity from the host context, and invokes the Unicorn Service Lambda.
+1. **The MCP host** (ChatGPT, Claude, etc.) sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the AgentCore Gateway URL.
+1. **AgentCore Gateway** receives the request. The associated WAF Web ACL evaluates the request against IP allowlist rules, rate limiting, and managed rule sets. Blocked requests are rejected before reaching any target.
+1. **AgentCore Gateway** forwards the MCP request to the AgentCore Runtime via the configured MCP Server target, authenticating with IAM (SigV4).
+1. **AgentCore Runtime (MCP Server)** receives the MCP request and invokes the Unicorn Service Lambda.
 1. **Unicorn Service Lambda** executes the business logic against DynamoDB and returns the results.
-1. **AgentCore Runtime (MCP Server)** wraps the response in MCP structured output with widget resource references and returns it to the host.
+1. **AgentCore Runtime (MCP Server)** wraps the response in MCP structured output with widget resource references and returns it through the Gateway to the host.
 
 #### Resource Flow (Widget Rendering)
+1. If the tool has an associated resource URI (for example, ui://widget/unicorn-list), the AI host initiates this phase. Tools without an associated widget such as view_bookings and return_unicorn, return text-only content and skip this phase entirely. 
+1. The host sends an MCP resources/read request for that URI. 
+1. The request reaches the MCP App through the API Gateway and proxy AWS Lambda. 
+1. The MCP App resolves the resource URI and returns the self-contained HTML of the widget. AI host might cache this data for better performance. 
+1. The host renders the HTML in a sandboxed iframe, injecting the structured data from the tool response via the MCP Apps lifecycle. 
+1. The widget fetches the images needed from Amazon CloudFront which uses Amazon S3 as the origin. 
 
-1. **The MCP host** receives a `tools/call` response containing a widget resource URI (e.g., `ui://widget/unicorn-list`) in the tool's `_meta.ui.resourceUri` field.
-1. **The MCP host** sends an MCP `resources/read` request for that URI to the API Gateway endpoint.
-1. **API Gateway** routes the request through WAF and forwards it to the Proxy Lambda.
-1. **API Gateway Proxy Lambda** forwards the request to AgentCore Runtime.
-1. **AgentCore Runtime (MCP Server)** resolves the resource URI, loads the corresponding widget HTML (served as an MCP resource using `registerAppResource`) and returns it.
-1. **The MCP host** renders the HTML widget in a sandboxed iframe, injecting the structured data from the original `tools/call` response via the MCP Apps lifecycle.
-1. Images referenced by widgets are fetched directly from **CloudFront** (backed by S3).
-
-#### Separation of Concerns
-
-This project demonstrates a clean separation between the **MCP protocol layer** and the **business logic layer**:
-
-- **MCP Server** (AgentCore Runtime) — Handles MCP protocol, tool definitions, structured output, widget resources (MCP Apps pattern), and customer identity resolution from host context. It delegates all business operations to the Unicorn Service Lambda.
-- **Unicorn Rental Service Lambda** — Pure business logic that accepts JSON requests and returns JSON responses.
 
 ## Deployment
 
@@ -87,12 +85,12 @@ This project demonstrates a clean separation between the **MCP protocol layer** 
 
 - AWS account with [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) enabled
 - AWS CLI configured (`aws configure`)
-- Node.js 22+ (for MCP server, proxy Lambda, and AWS CDK)
+- Node.js 22+ (for MCP server and AWS CDK)
 - AWS CDK CLI installed globally: `npm install -g aws-cdk`
 
 ### Step 1: Build All Artifacts
 
-A single build script handles both the API Gateway Proxy Lambda and MCP Server packaging:
+The build script packages the MCP Server for AgentCore Runtime:
 
 ```bash
 chmod +x build.sh
@@ -100,11 +98,10 @@ chmod +x build.sh
 ```
 
 This script:
-1. Builds the API Gateway Proxy Lambda (`src/lambda/api-gateway-proxy/dist/index.mjs`)
-2. Installs MCP server dependencies (clean install via `--clean` flag for reproducible builds)
-3. Bundles widget HTML files with Vite using `vite-plugin-singlefile` (inlines the MCP Apps SDK so widgets work on any host without external CDN dependencies)
-4. Bundles the Node.js server with esbuild into a single `main.js`
-5. Packages everything into `build/mcp-server-deployment.zip`
+1. Installs MCP server dependencies (clean install via `--clean` flag for reproducible builds)
+2. Bundles widget HTML files with Vite using `vite-plugin-singlefile` (inlines the MCP Apps SDK so widgets work on any host without external CDN dependencies)
+3. Bundles the Node.js server with esbuild into a single `main.js`
+4. Packages everything into `build/mcp-server-deployment.zip`
 
 The `--clean` flag removes `node_modules` and `package-lock.json` before installing, ensuring a reproducible build. Omit it for faster local iteration when dependencies haven't changed.
 
@@ -153,27 +150,28 @@ CDK will:
 3. Deploy the **Unicorn Service Lambda** with DynamoDB permissions
 4. Create the IAM role for AgentCore with S3 read and Lambda invoke permissions
 5. Create the AgentCore Runtime (MCP Server) pointing to the service Lambda
-6. Deploy the API Gateway Proxy Lambda
-7. Deploy API Gateway with WAF
+6. Deploy the **AgentCore Gateway** with No Auth inbound and MCP Server target (IAM outbound auth)
+7. Associate the **WAF Web ACL** with the Gateway (IP allowlist + managed rules)
+8. Apply a **resource-based policy** restricting runtime invocation to the Gateway only
 
-Note the outputs printed after deployment — you'll need the `McpEndpointUrl` to connect an MCP host.
+Note the outputs printed after deployment — you'll need the `GatewayResourceUrl` to connect an MCP host.
 
 ### Step 6: Connect to an MCP Host
 
-After deployment, connect the MCP endpoint to your preferred host:
+After deployment, connect the Gateway endpoint to your preferred host:
 
 - **ChatGPT** — [ChatGPT Setup Guide](docs/chatgpt-setup.md)
 - **Claude** — [Claude Setup Guide](docs/claude-setup.md)
 
-Both guides cover configuration steps, demo prompts, and troubleshooting. You'll need the `McpEndpointUrl` from the CDK output.
+Both guides cover configuration steps, demo prompts, and troubleshooting. You'll need the `GatewayResourceUrl` from the CDK output.
 
 ## Security
 
-This project implements multiple layers of security to protect the API endpoint and backend services:
+This project implements multiple layers of security to protect the MCP endpoint and backend services:
 
-### 1. WAF IP Allowlisting (API Gateway)
+### 1. WAF IP Allowlisting (AgentCore Gateway)
 
-AWS WAF is attached to the API Gateway with a **default-deny** policy. Only requests originating from allowlisted IP ranges are permitted through. The deployed stack includes outbound IP ranges for both ChatGPT ([OpenAI outbound IPs](https://openai.com/chatgpt-actions.json)) and Claude ([Anthropic outbound IPs](https://docs.anthropic.com/en/api/ip-addresses)). To connect additional MCP hosts or for testing the MCP server directly using tools like MCP Inspector, add their outbound IP ranges to the WAF IP set.
+AWS WAF is associated with the AgentCore Gateway with a **default-deny** policy. Only requests originating from allowlisted IP ranges are permitted through. The deployed stack includes outbound IP ranges for both ChatGPT ([OpenAI outbound IPs](https://openai.com/chatgpt-actions.json)) and Claude ([Anthropic outbound IPs](https://docs.anthropic.com/en/api/ip-addresses)). To connect additional MCP hosts or for testing the MCP server directly using tools like MCP Inspector, add their outbound IP ranges to the WAF IP set.
 
 ### 2. WAF Managed Rules (Common Attack Protection)
 
@@ -181,9 +179,13 @@ AWS WAF is attached to the API Gateway with a **default-deny** policy. Only requ
 - **AWS Managed Rules Known Bad Inputs** — Blocks requests with payloads known to be associated with exploitation
 - **Rate Limiting** — Blocks IPs exceeding 1,000 requests per 5-minute window
 
-### 3. Resource-Based Policy (AgentCore Runtime)
+### 3. IAM Authentication (Gateway to Runtime)
 
-A resource-based access policy is attached directly to the AgentCore Runtime. It explicitly allows only the API Gateway Proxy Lambda's execution role to invoke the runtime, and denies all other principals.
+The AgentCore Gateway authenticates to the AgentCore Runtime using IAM (SigV4 signing). The Gateway's execution role is granted `bedrock-agentcore:InvokeAgentRuntime` permission on the runtime ARN.
+
+### 4. Resource-Based Policy (AgentCore Runtime)
+
+A resource-based access policy is attached directly to the AgentCore Runtime. It explicitly allows only the AgentCore Gateway's execution role to invoke the runtime, and denies all other principals. This ensures the runtime cannot be accessed directly, bypassing the Gateway and its WAF protections.
 
 ## Cleanup
 

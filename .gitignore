@@ -41,11 +41,11 @@ lambda.zip
 # Build
 build/
 *.zip
+src/mcp-server/unicorn-rentals/widgets/
 
 # Blog drafts and working assets (not part of the open-source sample)
 blog-assets/
 .slack-messages/
 
-# Internal Amazon artifacts (not part of the open-source sample)
-.ash/
-Config
+# Presentation files
+docs/architecture.pptx

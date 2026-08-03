@@ -3,8 +3,7 @@
 # Build Script: Prepares all artifacts for CDK deployment
 #
 # This script handles:
-#   1. Building the API Gateway Proxy Lambda (esbuild bundle)
-#   2. Packaging the MCP Server for AgentCore Runtime (Vite + esbuild + zip)
+#   1. Packaging the MCP Server for AgentCore Runtime (Vite + esbuild + zip)
 #
 # Options:
 #   --clean   Force a clean install of dependencies (removes node_modules and
@@ -46,23 +45,9 @@ echo -e "${BLUE}============================================${NC}"
 echo ""
 
 # =============================================================================
-# Step 1: Build the API Gateway Proxy Lambda
+# Step 1: Package the MCP Server
 # =============================================================================
-echo -e "${GREEN}[1/2] Building API Gateway Proxy Lambda...${NC}"
-
-PROXY_DIR="$PROJECT_ROOT/src/lambda/api-gateway-proxy"
-
-cd "$PROXY_DIR"
-npm install --silent
-npm run build
-
-echo "      Output: src/lambda/api-gateway-proxy/dist/index.mjs"
-echo ""
-
-# =============================================================================
-# Step 2: Package the MCP Server
-# =============================================================================
-echo -e "${GREEN}[2/2] Packaging MCP Server for AgentCore Runtime...${NC}"
+echo -e "${GREEN}[1/1] Packaging MCP Server for AgentCore Runtime...${NC}"
 
 MCP_SERVER_DIR="$PROJECT_ROOT/src/mcp-server/unicorn-rentals"
 BUILD_DIR="$PROJECT_ROOT/build"

@@ -17,9 +17,9 @@ The widgets use the standard MCP Apps `postMessage` protocol (JSON-RPC with `str
 
 ### 1. Get your MCP endpoint URL
 
-After deploying with CDK, note the `McpEndpointUrl` output:
+After deploying with CDK, note the `GatewayResourceUrl` output:
 ```
-https://abc123.execute-api.us-east-1.amazonaws.com/prod/mcp
+https://abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp
 ```
 
 ### 2. Add as a Custom Connector
@@ -27,7 +27,7 @@ https://abc123.execute-api.us-east-1.amazonaws.com/prod/mcp
 1. Open [claude.ai](https://claude.ai)
 2. Go to **Customize > Connectors**
 3. Click **Add connector**
-4. Enter your `McpEndpointUrl` as the remote MCP server URL
+4. Enter your `GatewayResourceUrl` as the remote MCP server URL
 5. Give it a name (e.g. "Unicorn Rentals")
 6. Save
 
@@ -66,7 +66,7 @@ Add the server:
 {
   "mcpServers": {
     "unicorn-rentals": {
-      "url": "https://abc123.execute-api.us-east-1.amazonaws.com/prod/mcp"
+      "url": "https://abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
     }
   }
 }
@@ -97,7 +97,7 @@ Add to your project's `.mcp.json`:
   "mcpServers": {
     "unicorn-rentals": {
       "type": "url",
-      "url": "https://abc123.execute-api.us-east-1.amazonaws.com/prod/mcp"
+      "url": "https://abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
     }
   }
 }
@@ -116,7 +116,7 @@ import json
 import requests
 import anthropic
 
-MCP_URL = "https://abc123.execute-api.us-east-1.amazonaws.com/prod/mcp"
+MCP_URL = "https://abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
 
 # 1. Fetch tools from MCP server
 resp = requests.post(MCP_URL, json={
@@ -161,7 +161,7 @@ See [widget-rendering.md](widget-rendering.md) for the full technical explanatio
 
 ## WAF Considerations
 
-The API Gateway is protected by a WAF with an IP allowlist. Both ChatGPT's outbound IPs (`chatGptIpSet`) and Anthropic/Claude's outbound IPs are already included by default, so Claude (via claude.ai) and ChatGPT can reach the endpoint without any changes.
+The AgentCore Gateway is protected by a WAF with an IP allowlist. Both ChatGPT's outbound IPs (`chatGptIpSet`) and Anthropic/Claude's outbound IPs are already included by default, so Claude (via claude.ai) and ChatGPT can reach the endpoint without any changes.
 
 > **Important:** The ChatGPT outbound IP ranges may change over time. Always check the latest values from OpenAI's official documentation before deploying to production.
 
@@ -201,7 +201,7 @@ npx cdk deploy
 |---------|----------|
 | **403 Forbidden** | Your IP isn't in the WAF allowlist. See WAF Considerations above. |
 | **Widgets not rendering** | Ensure you're using claude.ai or Claude Desktop (not Claude Code). Check that the MCP server returns `_meta` with `ui.resourceUri` on tool results. |
-| **Connection timeout** | Verify the API Gateway URL is correct and the stack is deployed. Try `curl -X POST <url>`. |
+| **Connection timeout** | Verify the Gateway URL is correct and the stack is deployed. Try `curl -X POST <url>`. |
 | **Tools not appearing** | In Claude Desktop: restart after config change, check logs via **Help > Debug > MCP**. On claude.ai: ensure connector is enabled for the conversation. |
 | **"Unable to identify customer"** | Provide a `customer_id` argument explicitly — Claude doesn't send `openai/subject` context. |
 | **Cold start delay** | First request after idle may take 30-60 seconds while AgentCore spins up. Retry. |

@@ -4,7 +4,7 @@ Step-by-step guide to connect your deployed MCP server to ChatGPT as an App.
 
 ## Prerequisites
 
-- Infrastructure deployed via CDK (`npx cdk deploy`) — you need the `McpEndpointUrl` output
+- Infrastructure deployed via CDK (`npx cdk deploy`) — you need the `GatewayResourceUrl` output
 - A **ChatGPT Plus, Team, or Enterprise** account
 - Developer mode enabled (see Step 1)
 
@@ -20,17 +20,17 @@ Step-by-step guide to connect your deployed MCP server to ChatGPT as an App.
 
 ## Step 2: Create the App
 
-1. Go to **Settings > Apps**
-2. Click **Create app**
+1. Go to **Plugins**
+2. Click **New Plugin**
 3. Fill in the following:
 
 | Field | Value |
 |-------|-------|
 | **Name** | `UnicornRentals` |
 | **Description** | `Browse unicorns, book rentals, view active bookings, and return unicorns. Shows rich UI cards with pricing and booking confirmations.` |
-| **MCP Endpoint URL** | Your `McpEndpointUrl` CDK output, e.g. `https://abc123.execute-api.us-east-1.amazonaws.com/prod/mcp` |
+| **Connection** | Your `GatewayResourceUrl` CDK output, e.g. `https://abc123.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp` |
 
-4. Set **Authentication** to **None**
+4. Set **Authentication** to **No Auth**
 5. Click **Create**
 
 If the connection succeeds, ChatGPT will discover the tools your server advertises:
@@ -82,30 +82,21 @@ If widgets aren't rendering, verify:
 - Your CloudFront distribution is accessible: `curl -I https://<your-cloudfront-domain>/images/stardust.png`
 - Widget HTML templates are loading correctly by testing with `resources/read` via curl (see below)
 
-## Updating Your App
-
-After making changes to your MCP server (adding tools, changing descriptions):
-
-1. Repackage: `./src/scripts/package-mcp-server.sh`
-2. Redeploy: `npx cdk deploy` (from `infrastructure/cdk/`)
-3. In ChatGPT: **Settings > Apps** > click your app > click **Refresh**
-4. Verify the tool list updates
-
 ## Testing Without ChatGPT
 
 You can verify the MCP server works before connecting to ChatGPT.
 
-> **Important:** The API Gateway is protected by a WAF that only allows specific IP addresses. Before testing, add your machine's outbound IP to the WAF IP set — either by updating the `allowedIpSet` in the CDK stack and redeploying, or by adding the IP directly in the AWS WAF console. Without this, all requests from non-allowlisted IPs will receive a 403 Forbidden response.
+> **Important:** The API is protected by a WAF that only allows specific IP addresses. Before testing, add your machine's outbound IP to the WAF IP set — either by updating the `allowedIpSet` in the CDK stack and redeploying, or by adding the IP directly in the AWS WAF console. Without this, all requests from non-allowlisted IPs will receive a 403 Forbidden response.
 
 ### Option A: MCP Inspector
 ```bash
 npx @modelcontextprotocol/inspector@latest
-# Enter your McpEndpointUrl, click List Tools, Call Tool
+# Enter your GatewayResourceUrl, click List Tools, Call Tool
 ```
 
 ### Option B: curl
 ```bash
-MCP_URL="https://<your-api-gateway>/prod/mcp"
+MCP_URL="https://<your-gateway-id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp"
 
 # Initialize — capture the Mcp-Session-Id from the response header
 curl -s -X POST "$MCP_URL" \
@@ -145,10 +136,10 @@ curl -s -X POST "$MCP_URL" \
 
 | Problem | Solution |
 |---------|----------|
-| **App creation fails** | Verify your API Gateway URL is publicly reachable. Try `curl -X POST <url>` — you should get a JSON-RPC response, not a 403 or timeout. |
+| **App creation fails** | Verify your Gateway URL is publicly reachable. Try `curl -X POST <url>` — you should get a JSON-RPC response, not a 403 or timeout. |
 | **403 Forbidden** | Your IP is not in the WAF allowlist. The WAF only allows ChatGPT's outbound IPs. For testing, temporarily add your IP to the `chatGptIpSet` in the CDK stack, or use the MCP Inspector approach above. |
 | **Tools list is empty** | The MCP server may still be starting. AgentCore cold starts can take 30-60 seconds. Wait and click **Refresh** in app settings. |
-| **Widget doesn't render** | Verify the `resources/read` request works by calling it via curl. Check CloudWatch logs for the proxy Lambda. |
-| **502 Gateway errors** | Check Lambda logs in CloudWatch. Common causes: Lambda timeout (increase from 30s), AgentCore Runtime not ready, IAM permissions missing. |
-| **Session errors** | The `Mcp-Session-Id` header may not be passing through. Check API Gateway CORS configuration includes this header. |
+| **Widget doesn't render** | Verify the `resources/read` request works by calling it via curl. Check CloudWatch logs for the AgentCore Runtime. |
+| **502 Gateway errors** | Check AgentCore Runtime logs in CloudWatch. Common causes: runtime timeout, AgentCore Runtime not ready, IAM permissions missing. |
+| **Session errors** | The `Mcp-Session-Id` header may not be passing through correctly. Verify the Gateway is in READY state. |
 | **"Unicorn not available"** | Another session may have booked it. Use `list_unicorns` to check availability, or return a previously booked unicorn first. |

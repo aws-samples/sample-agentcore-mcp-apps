@@ -9,9 +9,8 @@
  *   3. DynamoDB tables for unicorn and booking data
  *   4. IAM Role for AgentCore Runtime
  *   5. AgentCore Runtime (MCP Server) via direct code deploy (Node.js 22)
- *   6. Lambda proxy function (Node.js) + Resource-based policy on Runtime
- *   7. API Gateway for ChatGPT connector
- *   8. WAF Web ACL — ChatGPT IP allowlist + AWS Managed Rules
+ *   6. AgentCore Gateway (No Auth inbound, MCP target pointing to Runtime)
+ *   7. WAF Web ACL — ChatGPT/Claude IP allowlist + AWS Managed Rules
  */
 
 import * as cdk from "aws-cdk-lib";
@@ -22,9 +21,10 @@ import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import * as cr from "aws-cdk-lib/custom-resources";
+import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
+import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
 import * as path from "path";
 
@@ -97,7 +97,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
       ],
       destinationBucket: deploymentBucket,
       destinationKeyPrefix: "mcp-server",
-      prune: true, // Delete old objects when new ones are deployed
+      prune: true,
     });
 
     // ----------------------------------------------------------------
@@ -321,42 +321,95 @@ export class AgentCoreMcpStack extends cdk.Stack {
     agentCoreRuntime.node.addDependency(zipDeployment);
 
     const runtimeArn = agentCoreRuntime.getAtt("AgentRuntimeArn").toString();
+    const runtimeId = agentCoreRuntime.getAtt("AgentRuntimeId").toString();
 
     new cdk.CfnResource(this, "McpEndpoint", {
       type: "AWS::BedrockAgentCore::RuntimeEndpoint",
       properties: {
         Name: `${project.replace(/-/g, "_")}_endpoint`,
-        AgentRuntimeId: agentCoreRuntime.getAtt("AgentRuntimeId").toString(),
+        AgentRuntimeId: runtimeId,
         Description: `${project} MCP endpoint`,
       },
     });
 
     // ----------------------------------------------------------------
-    // 6. Lambda Proxy (Node.js)
+    // 6. AgentCore Gateway — No Auth inbound, MCP Server target
     // ----------------------------------------------------------------
-    const proxyFn = new lambda.Function(this, "ProxyFunction", {
-      functionName: `${project}-proxy`,
-      runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "index.handler",
-      code: lambda.Code.fromAsset(path.join(__dirname, "..", "..", "..", "src", "lambda", "api-gateway-proxy", "dist")),
-      timeout: cdk.Duration.seconds(30),
-      environment: {
-        RUNTIME_ARN: runtimeArn,
-        CORS_ALLOWED_ORIGINS: corsAllowedOriginsParam.valueAsString,
+
+    // The Gateway uses No Auth for inbound requests (WAF provides IP-based protection)
+    const gateway = new agentcore.Gateway(this, "McpGateway", {
+      gatewayName: `${project}-gateway`,
+      description: "AgentCore Gateway for Unicorn Rentals MCP Server",
+      protocolConfiguration: new agentcore.McpProtocolConfiguration({
+        instructions: "Use this gateway to access the Unicorn Rentals MCP tools",
+        searchType: agentcore.McpGatewaySearchType.SEMANTIC,
+        supportedVersions: [agentcore.MCPProtocolVersion.MCP_2025_03_26],
+      }),
+      authorizerConfiguration: agentcore.GatewayAuthorizer.withNoAuth(),
+    });
+
+    // The MCP endpoint URL of the AgentCore Runtime
+    // The endpoint requires URL-encoded ARN: https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<encoded-ARN>/invocations?qualifier=DEFAULT
+    // Since runtimeArn is a CFN token, we use Fn.join to perform URL-encoding at deploy time.
+    // ARN format: arn:aws:bedrock-agentcore:<region>:<account>:runtime/<id>
+    // Encoded:    arn%3Aaws%3Abedrock-agentcore%3A<region>%3A<account>%3Aruntime%2F<id>
+    const encodedRuntimeArn = cdk.Fn.join("", [
+      "arn%3Aaws%3Abedrock-agentcore%3A",
+      this.region,
+      "%3A",
+      this.account,
+      "%3Aruntime%2F",
+      runtimeId,
+    ]);
+    const runtimeMcpEndpoint = `https://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${encodedRuntimeArn}/invocations?qualifier=DEFAULT`;
+
+    // Add MCP Server target pointing to the AgentCore Runtime's MCP endpoint
+    // Uses IAM (SigV4) authentication for outbound calls to the Runtime
+    // Note: The L2 fromIamRole() doesn't pass service/region, but the service
+    // requires them for MCP Server targets. Using L1 (CfnResource) directly.
+    const runtimeMcpTarget = new cdk.CfnResource(this, "RuntimeMcpTarget", {
+      type: "AWS::BedrockAgentCore::GatewayTarget",
+      properties: {
+        GatewayIdentifier: gateway.gatewayId,
+        Name: `${project}-runtime-target`,
+        Description: "AgentCore Runtime MCP Server target with IAM auth",
+        TargetConfiguration: {
+          Mcp: {
+            McpServer: {
+              Endpoint: runtimeMcpEndpoint,
+            },
+          },
+        },
+        CredentialProviderConfigurations: [
+          {
+            CredentialProviderType: "GATEWAY_IAM_ROLE",
+            CredentialProvider: {
+              IamCredentialProvider: {
+                Service: "bedrock-agentcore",
+                Region: this.region,
+              },
+            },
+          },
+        ],
       },
     });
 
-    proxyFn.addToRolePolicy(
+    // Grant the Gateway's execution role permission to invoke the Runtime
+    const gatewayPolicyGrant = gateway.role.addToPrincipalPolicy(
       new iam.PolicyStatement({
         actions: ["bedrock-agentcore:InvokeAgentRuntime"],
         resources: [`${runtimeArn}*`],
       })
     );
 
+    // Ensure the target isn't created until the Gateway role's IAM policy has been applied.
+    // Without this, CFN may create the target before IAM propagates, causing "Authorization error".
+    if (gatewayPolicyGrant.policyDependable) {
+      runtimeMcpTarget.node.addDependency(gatewayPolicyGrant.policyDependable);
+    }
+
     // ----------------------------------------------------------------
-    // 6b. Resource-Based Policy — restrict runtime invocation to proxy Lambda only
-    // Uses a custom Lambda (boto3) since the CDK AwsCustomResource SDK package
-    // for BedrockAgentCoreControl is not yet available in the custom resource runtime.
+    // 6b. Resource-Based Policy — restrict runtime invocation to Gateway only
     // ----------------------------------------------------------------
     const resourcePolicyFn = new lambda.Function(this, "ResourcePolicyFunction", {
       functionName: `${project}-resource-policy-cr`,
@@ -381,7 +434,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
       onEventHandler: resourcePolicyFn,
     });
 
-    new cdk.CustomResource(this, "RuntimeResourcePolicy", {
+    const runtimeResourcePolicy = new cdk.CustomResource(this, "RuntimeResourcePolicy", {
       serviceToken: resourcePolicyProvider.serviceToken,
       properties: {
         ResourceArn: runtimeArn,
@@ -389,10 +442,10 @@ export class AgentCoreMcpStack extends cdk.Stack {
           Version: "2012-10-17",
           Statement: [
             {
-              Sid: "AllowProxyLambdaOnly",
+              Sid: "AllowGatewayOnly",
               Effect: "Allow",
               Principal: {
-                AWS: proxyFn.role!.roleArn,
+                AWS: gateway.role.roleArn,
               },
               Action: "bedrock-agentcore:InvokeAgentRuntime",
               Resource: runtimeArn,
@@ -405,7 +458,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
               Resource: runtimeArn,
               Condition: {
                 StringNotEquals: {
-                  "aws:PrincipalArn": proxyFn.role!.roleArn,
+                  "aws:PrincipalArn": gateway.role.roleArn,
                 },
               },
             },
@@ -414,25 +467,12 @@ export class AgentCoreMcpStack extends cdk.Stack {
       },
     });
 
-    // ----------------------------------------------------------------
-    // 7. API Gateway
-    // ----------------------------------------------------------------
-    const api = new apigateway.RestApi(this, "McpApi", {
-      restApiName: `${project}-api`,
-      description: "ChatGPT MCP Proxy API",
-      endpointTypes: [apigateway.EndpointType.REGIONAL],
-      defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
-        allowMethods: ["POST", "OPTIONS"],
-        allowHeaders: ["Content-Type", "Mcp-Session-Id"],
-      },
-    });
-
-    const mcpResource = api.root.addResource("mcp");
-    mcpResource.addMethod("POST", new apigateway.LambdaIntegration(proxyFn));
+    // Ensure the Gateway Target is not created until the resource policy is in place,
+    // otherwise CFN's connectivity validation fails with "Authorization error".
+    runtimeMcpTarget.node.addDependency(runtimeResourcePolicy);
 
     // ----------------------------------------------------------------
-    // 8. WAF — IP Allowlist + Basic Protection
+    // 7. WAF — IP Allowlist + Basic Protection
     // ----------------------------------------------------------------
 
     // ChatGPT Actions outbound IP ranges (source: https://openai.com/chatgpt-actions.json)
@@ -505,7 +545,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
 
     // Web ACL with IP allowlist + AWS Managed Rules for common threats
     const webAcl = new wafv2.CfnWebACL(this, "ApiWafAcl", {
-      name: `${project}-api-waf`,
+      name: `${project}-gateway-waf`,
       scope: "REGIONAL",
       defaultAction: { block: {} },
       visibilityConfig: {
@@ -600,18 +640,22 @@ export class AgentCoreMcpStack extends cdk.Stack {
       ],
     });
 
-    // Associate WAF Web ACL with API Gateway stage
-    new wafv2.CfnWebACLAssociation(this, "ApiWafAssociation", {
-      resourceArn: `arn:aws:apigateway:${this.region}::/restapis/${api.restApiId}/stages/${api.deploymentStage.stageName}`,
+    // Associate WAF Web ACL with the AgentCore Gateway
+    new wafv2.CfnWebACLAssociation(this, "GatewayWafAssociation", {
+      resourceArn: gateway.gatewayArn,
       webAclArn: webAcl.attrArn,
     });
 
     // ----------------------------------------------------------------
     // Outputs
     // ----------------------------------------------------------------
-    new cdk.CfnOutput(this, "McpEndpointUrl", {
-      description: "MCP endpoint URL for ChatGPT connector",
-      value: `${api.url}mcp`,
+    new cdk.CfnOutput(this, "GatewayResourceUrl", {
+      description: "MCP Server URL — copy and paste this into your AI host (ChatGPT, Claude, etc.)",
+      value: gateway.gatewayUrl!,
+    });
+    new cdk.CfnOutput(this, "GatewayArn", {
+      description: "AgentCore Gateway ARN",
+      value: gateway.gatewayArn,
     });
     new cdk.CfnOutput(this, "WidgetBaseUrl", {
       description: "CloudFront URL for images",
@@ -629,5 +673,110 @@ export class AgentCoreMcpStack extends cdk.Stack {
       description: "Unicorn Service Lambda ARN",
       value: unicornServiceFn.functionArn,
     });
+
+    // ----------------------------------------------------------------
+    // cdk-nag Suppressions (per-resource)
+    // ----------------------------------------------------------------
+
+    // S3 Buckets — access logs not required for demo/sample application
+    NagSuppressions.addResourceSuppressions(widgetsBucket, [
+      { id: "AwsSolutions-S1", reason: "Demo app — access logs add cost with no benefit for sample code." },
+    ]);
+    NagSuppressions.addResourceSuppressions(deploymentBucket, [
+      { id: "AwsSolutions-S1", reason: "Demo app — access logs add cost with no benefit for sample code." },
+    ]);
+
+    // S3 Bucket Policies — SSL enforcement: buckets accessed only via CloudFront OAC and CDK internals
+    NagSuppressions.addResourceSuppressions(
+      [widgetsBucket, deploymentBucket],
+      [{ id: "AwsSolutions-S10", reason: "Buckets accessed only via CloudFront OAC or CDK-internal operations, not directly by users." }],
+      true, // applyToChildren (catches the Policy/Resource child)
+    );
+
+    // CloudFront — demo serves public unicorn images, no custom domain
+    NagSuppressions.addResourceSuppressions(widgetsCdn, [
+      { id: "AwsSolutions-CFR1", reason: "Demo app requires global access; geo restrictions not applicable." },
+      { id: "AwsSolutions-CFR2", reason: "Static image CDN for public assets; WAF protection is on the Gateway instead." },
+      { id: "AwsSolutions-CFR3", reason: "Demo app — CloudFront access logs not required for sample workload." },
+      { id: "AwsSolutions-CFR4", reason: "No custom domain configured; cannot override default CloudFront viewer certificate TLS policy." },
+    ]);
+
+    // DynamoDB — demo tables with seed data, easily recreated via CDK deploy
+    NagSuppressions.addResourceSuppressions(unicornsTable, [
+      { id: "AwsSolutions-DDB3", reason: "Demo tables with seed data — PITR not needed; data recreated on deploy." },
+    ]);
+    NagSuppressions.addResourceSuppressions(bookingsTable, [
+      { id: "AwsSolutions-DDB3", reason: "Demo tables with seed data — PITR not needed; data recreated on deploy." },
+    ]);
+
+    // Lambda runtimes — CDK BucketDeployment uses its own internal runtime; others use Python 3.12
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C/Resource",
+      [{ id: "AwsSolutions-L1", reason: "CDK BucketDeployment internal Lambda — runtime managed by CDK, not user-configurable." }],
+    );
+    NagSuppressions.addResourceSuppressions(unicornServiceFn, [
+      { id: "AwsSolutions-L1", reason: "Python 3.12 is the latest stable runtime supported by the service code." },
+    ]);
+    NagSuppressions.addResourceSuppressions(resourcePolicyFn, [
+      { id: "AwsSolutions-L1", reason: "Python 3.12 is the latest stable runtime supported by the custom resource handler." },
+    ]);
+
+    // IAM4 — AWS managed policies: CDK-generated Lambda basic execution roles (standard CDK pattern)
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C/ServiceRole/Resource",
+      [{ id: "AwsSolutions-IAM4", reason: "CDK BucketDeployment internal role — managed by CDK.", appliesTo: ["Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"] }],
+    );
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/AWS679f53fac002430cb0da5b7982bd2287/ServiceRole/Resource",
+      [{ id: "AwsSolutions-IAM4", reason: "CDK AwsCustomResource internal role — managed by CDK.", appliesTo: ["Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"] }],
+    );
+    NagSuppressions.addResourceSuppressions(unicornServiceFn, [
+      { id: "AwsSolutions-IAM4", reason: "Standard CDK Lambda execution role pattern.", appliesTo: ["Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"] },
+    ], true);
+    NagSuppressions.addResourceSuppressions(resourcePolicyFn, [
+      { id: "AwsSolutions-IAM4", reason: "Standard CDK Lambda execution role pattern.", appliesTo: ["Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"] },
+    ], true);
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/ResourcePolicyProvider/framework-onEvent/ServiceRole/Resource",
+      [{ id: "AwsSolutions-IAM4", reason: "CDK Provider framework internal role — managed by CDK.", appliesTo: ["Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"] }],
+    );
+
+    // IAM5 — Wildcard permissions on CDK-managed and custom resource roles
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/AgentCoreRole/DefaultPolicy/Resource",
+      [{ id: "AwsSolutions-IAM5", reason: "AgentCore role needs s3:GetObject on all objects in deployment bucket.", appliesTo: ["Resource::<DeploymentBucketC91A09DA.Arn>/*"] }],
+    );
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/Custom::CDKBucketDeployment8693BB64968944B69AAFB0CC9EB8756C/ServiceRole/DefaultPolicy/Resource",
+      [{
+        id: "AwsSolutions-IAM5",
+        reason: "CDK BucketDeployment requires broad S3 permissions to deploy assets — managed by CDK.",
+        appliesTo: [
+          "Action::s3:GetObject*",
+          "Action::s3:GetBucket*",
+          "Action::s3:List*",
+          "Action::s3:DeleteObject*",
+          "Action::s3:Abort*",
+          { regex: "/^Resource::arn:<AWS::Partition>:s3:::cdk-hnb659fds-assets-.*/" },
+          "Resource::<WidgetsBucket16C40FE1.Arn>/*",
+          "Resource::<DeploymentBucketC91A09DA.Arn>/*",
+          "Resource::*",
+        ],
+      }],
+    );
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/ResourcePolicyFunction/ServiceRole/DefaultPolicy/Resource",
+      [{ id: "AwsSolutions-IAM5", reason: "bedrock-agentcore:PutResourcePolicy does not support ARN-level scoping at deploy time (runtime ARN is a CFN token).", appliesTo: ["Resource::*"] }],
+    );
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/ResourcePolicyProvider/framework-onEvent/ServiceRole/DefaultPolicy/Resource",
+      [{ id: "AwsSolutions-IAM5", reason: "CDK Provider framework invokes the onEvent handler — wildcard qualifier is CDK-managed.", appliesTo: ["Resource::<ResourcePolicyFunction661A6B84.Arn>:*"] }],
+    );
+
+    // Gateway role — needs InvokeAgentRuntime with wildcard qualifier on the runtime ARN
+    NagSuppressions.addResourceSuppressionsByPath(this,
+      "/AgentCoreMcpStack/McpGateway/ServiceRole/DefaultPolicy/Resource",
+      [{ id: "AwsSolutions-IAM5", reason: "Gateway role requires bedrock-agentcore:InvokeAgentRuntime on runtime ARN with wildcard qualifier for endpoint routing.", appliesTo: ["Resource::<McpRuntime.AgentRuntimeArn>*"] }],
+    );
   }
 }
