@@ -89,17 +89,54 @@ You will be able to interact with the app with requests like:
 
 ### Prerequisites
 
-- AWS account with [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) enabled
-- AWS CLI configured (`aws configure`)
+- AWS account with [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html) enabled. AgentCore is only available in [certain regions](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) — `us-west-2` is a safe default
+- AWS CLI v2 configured (`aws configure`). Use a recent build: the `bedrock-agentcore` commands used for troubleshooting were added in later v2 releases
 - Node.js 22+ (for MCP server and AWS CDK)
-- AWS CDK CLI installed globally: `npm install -g aws-cdk`
+- AWS CDK CLI: `npm install -g aws-cdk` (or rely on the bundled `npx cdk`)
 
-### Step 1: Build All Artifacts
+### Deploy in one command
+
+```bash
+./deploy.sh
+```
+
+That's it. The script runs preflight checks (tooling, credentials, region support), builds the artifacts, installs CDK dependencies, bootstraps CDK if needed, and deploys the stack.
+
+Deployment typically takes **10–20 minutes, occasionally up to an hour**. Everything except the CloudFront distribution is usually done within the first 5 minutes; CloudFront then takes as long as it takes to propagate, and the CLI looks stalled at roughly 43/49 resources while it does. That wait is normal — as long as `cdk deploy` has not reported an error, leave it running.
+
+When it finishes, note the **`GatewayResourceUrl`** output: that is the MCP Server URL you paste into your AI host.
+
+Useful variations:
+
+```bash
+./deploy.sh --require-approval never       # skip the IAM approval prompt
+./deploy.sh -c projectName=my-unicorns     # override the default 'unicorn-mcp' project name
+```
+
+### Verify your deployment
+
+The Gateway sits behind AWS WAF with a **default-deny** policy that only allows the ChatGPT and Claude egress ranges (see [Security](#security)). A useful consequence is that the endpoint is not publicly reachable — but it also means **you cannot call your own endpoint** after deploying: every request returns `HTTP 403`.
+
+To smoke-test it anyway:
+
+```bash
+./verify.sh
+```
+
+This temporarily adds your public IP to the WAF allowlist, runs `initialize` → `tools/list` → `tools/call list_unicorns` against the live endpoint, prints a pass/fail summary, then **removes your IP again** (including if a check fails or you interrupt it).
+
+If you want to keep poking at the endpoint yourself — for example with [MCP Inspector](https://github.com/modelcontextprotocol/inspector) — use `./verify.sh --keep-ip` and remember to remove the entry afterwards.
+
+> **Note on tool names:** through the Gateway, tools are exposed as `<target>___<tool>` (for example `unicorn-mcp-runtime-target___list_unicorns`), and the Gateway also injects its own `x_amz_bedrock_agentcore_search` tool. AI hosts handle this for you; it only matters if you are calling the MCP API directly.
+
+<details>
+<summary><strong>Manual steps (if you prefer to run each stage yourself)</strong></summary>
+
+#### Step 1: Build All Artifacts
 
 The build script packages the MCP Server for AgentCore Runtime:
 
 ```bash
-chmod +x build.sh
 ./build.sh --clean
 ```
 
@@ -113,14 +150,14 @@ The `--clean` flag removes `node_modules` and `package-lock.json` before install
 
 The build output is pure JavaScript — no native modules — so it runs on ARM64 AgentCore Runtime regardless of the build host architecture.
 
-### Step 2: Install CDK Dependencies
+#### Step 2: Install CDK Dependencies
 
 ```bash
 cd infrastructure/cdk
 npm install
 ```
 
-### Step 3: Bootstrap CDK (first time only)
+#### Step 3: Bootstrap CDK (first time only)
 
 If this is the first time deploying CDK in your AWS account/region, you need to bootstrap:
 
@@ -128,7 +165,7 @@ If this is the first time deploying CDK in your AWS account/region, you need to 
 npx cdk bootstrap
 ```
 
-### Step 4: Synthesize the CloudFormation Template
+#### Step 4: Synthesize the CloudFormation Template
 
 Verify the stack synthesizes without errors:
 
@@ -144,11 +181,15 @@ npx cdk synth -c projectName=unicorn-rentals
 
 The default project name is `unicorn-mcp`.
 
-### Step 5: Deploy
+#### Step 5: Deploy
 
 ```bash
 npx cdk deploy
 ```
+
+</details>
+
+### What gets deployed
 
 CDK will:
 1. Create the S3 deployment bucket and upload the MCP server zip
@@ -162,7 +203,7 @@ CDK will:
 
 Note the outputs printed after deployment — you'll need the `GatewayResourceUrl` to connect an MCP host.
 
-### Step 6: Connect to an MCP Host
+### Connect to an MCP Host
 
 After deployment, connect the Gateway endpoint to your preferred host:
 
@@ -195,9 +236,11 @@ A resource-based access policy is attached directly to the AgentCore Runtime. It
 
 ## Cleanup
 
-To destroy all deployed resources:
+The deployed stack has standing costs even when idle — the WAF Web ACL, the CloudFront distribution and the AgentCore Runtime all bill while they exist. Tear everything down when you are finished:
 
 ```bash
 cd infrastructure/cdk
 npx cdk destroy
 ```
+
+Deletion takes a few minutes, again mostly waiting on CloudFront. The DynamoDB tables and S3 buckets are configured to delete with the stack, so nothing is left behind.

@@ -1,16 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# Deploy Script: Build all artifacts and deploy via CDK
+# Deploy Script: one command to build and deploy the whole solution
 #
 # This script handles:
-#   1. Building artifacts (delegates to build.sh)
-#   2. Installing CDK dependencies
-#   3. Bootstrapping CDK (if not already done)
-#   4. Deploying the stack via CDK
+#   1. Preflight checks (tooling, credentials, region support)
+#   2. Building artifacts (delegates to build.sh)
+#   3. Installing CDK dependencies
+#   4. Bootstrapping CDK (if not already done)
+#   5. Deploying the stack via CDK
 #
 # Usage:
-#   ./deploy.sh                  # Build and deploy (with approval prompt)
-#   ./deploy.sh --require-approval never   # Auto-approve deployment
+#   ./deploy.sh                             # Build and deploy
+#   ./deploy.sh --require-approval never    # Skip the IAM approval prompt
+#   ./deploy.sh -c projectName=my-unicorns  # Any other cdk deploy args pass through
 # =============================================================================
 
 set -euo pipefail
@@ -19,19 +21,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 CDK_DIR="$PROJECT_ROOT/infrastructure/cdk"
 
-# Pass-through args to cdk deploy (e.g. --require-approval never)
-CDK_ARGS="${*}"
+# Minimum Node major version the MCP server and CDK app expect.
+NODE_MIN_MAJOR=22
+
+# AgentCore is not available in every region yet. Deploying elsewhere fails deep
+# inside CloudFormation with an opaque error, so warn up front instead.
+AGENTCORE_REGIONS="us-east-1 us-west-2 eu-central-1 ap-southeast-2"
 
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Prerequisite check
-for cmd in aws npx; do
-  command -v "$cmd" >/dev/null 2>&1 || { echo -e "${RED}Error: '$cmd' not found. See README prerequisites.${NC}"; exit 1; }
-done
+fail() { echo -e "${RED}Error: $1${NC}" >&2; exit 1; }
+warn() { echo -e "${YELLOW}Warning: $1${NC}"; }
 
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}  Build & Deploy${NC}"
@@ -39,18 +44,55 @@ echo -e "${BLUE}============================================${NC}"
 echo ""
 
 # =============================================================================
-# Step 1: Build all artifacts
+# Step 1: Preflight checks
+#
+# Everything here is cheap and catches the failures that are otherwise painful
+# to diagnose: missing tooling, expired credentials, or an unsupported region.
 # =============================================================================
-echo -e "${GREEN}[1/4] Building artifacts...${NC}"
+echo -e "${GREEN}[1/5] Preflight checks...${NC}"
 
-"$SCRIPT_DIR/build.sh"
+for cmd in aws node npx; do
+  command -v "$cmd" >/dev/null 2>&1 || fail "'$cmd' not found. See the README prerequisites."
+done
+
+NODE_MAJOR="$(node --version | sed 's/^v\([0-9]*\).*/\1/')"
+if [ "$NODE_MAJOR" -lt "$NODE_MIN_MAJOR" ]; then
+  fail "Node $NODE_MIN_MAJOR+ required (found $(node --version)). See the README prerequisites."
+fi
+echo "      Node $(node --version)"
+
+# Credentials must be valid before we spend time building.
+CALLER="$(aws sts get-caller-identity --output json 2>/dev/null)" \
+  || fail "AWS credentials are not configured or have expired. Run 'aws configure' (or refresh your session) and try again."
+ACCOUNT="$(printf '%s' "$CALLER" | sed -n 's/.*"Account": *"\([0-9]*\)".*/\1/p')"
+
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || true)}}"
+[ -n "$REGION" ] || fail "No AWS region configured. Set AWS_REGION or run 'aws configure'."
+
+echo "      Account $ACCOUNT / region $REGION"
+
+# A region check, not a hard gate: the supported list changes over time and we
+# would rather warn than block a legitimate deployment in a new region.
+case " $AGENTCORE_REGIONS " in
+  *" $REGION "*) : ;;
+  *) warn "Amazon Bedrock AgentCore may not be available in '$REGION'. Known regions: $AGENTCORE_REGIONS. If deployment fails, retry with AWS_REGION=us-west-2." ;;
+esac
 
 echo ""
 
 # =============================================================================
-# Step 2: Install CDK dependencies
+# Step 2: Build all artifacts
 # =============================================================================
-echo -e "${GREEN}[2/4] Installing CDK dependencies...${NC}"
+echo -e "${GREEN}[2/5] Building artifacts...${NC}"
+
+bash "$SCRIPT_DIR/build.sh"
+
+echo ""
+
+# =============================================================================
+# Step 3: Install CDK dependencies
+# =============================================================================
+echo -e "${GREEN}[3/5] Installing CDK dependencies...${NC}"
 
 cd "$CDK_DIR"
 npm install --silent
@@ -59,16 +101,11 @@ echo "      Done."
 echo ""
 
 # =============================================================================
-# Step 3: Bootstrap CDK (if needed)
+# Step 4: Bootstrap CDK (if needed)
 # =============================================================================
-echo -e "${GREEN}[3/4] Checking CDK bootstrap status...${NC}"
+echo -e "${GREEN}[4/5] Checking CDK bootstrap status...${NC}"
 
-if ! aws sts get-caller-identity > /dev/null 2>&1; then
-    echo -e "${RED}Error: AWS credentials not configured or invalid. Please configure AWS CLI credentials.${NC}"
-    exit 1
-fi
-
-if aws cloudformation describe-stacks --stack-name CDKToolkit > /dev/null 2>&1; then
+if aws cloudformation describe-stacks --stack-name CDKToolkit --region "$REGION" > /dev/null 2>&1; then
     echo "      CDKToolkit stack found — bootstrap already complete."
 else
     echo "      CDKToolkit stack not found — running cdk bootstrap..."
@@ -78,14 +115,25 @@ fi
 echo ""
 
 # =============================================================================
-# Step 4: Deploy
+# Step 5: Deploy
 # =============================================================================
-echo -e "${GREEN}[4/4] Deploying AgentCoreMcpStack...${NC}"
+echo -e "${GREEN}[5/5] Deploying AgentCoreMcpStack...${NC}"
+echo "      This usually takes 10-20 minutes, occasionally longer. Everything"
+echo "      except CloudFront is done in the first few minutes; the CLI then"
+echo "      looks stalled around 43/49 while CloudFront propagates. That is"
+echo "      expected — leave it running unless you see an actual error."
 echo ""
 
-npx cdk deploy AgentCoreMcpStack "$CDK_ARGS"
+# "$@" (not a single joined string) so multi-word args survive intact.
+npx cdk deploy AgentCoreMcpStack "$@"
 
 echo ""
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}  Deployment complete!${NC}"
 echo -e "${BLUE}============================================${NC}"
+echo ""
+echo "Next steps:"
+echo "  ./verify.sh    # smoke-test the deployed MCP endpoint"
+echo ""
+echo "Copy the GatewayResourceUrl output above into your AI host — see"
+echo "docs/chatgpt-setup.md or docs/claude-setup.md."
