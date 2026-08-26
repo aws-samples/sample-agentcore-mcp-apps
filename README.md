@@ -20,6 +20,7 @@ This sample shows how to deploy an [MCP (Model Context Protocol)](https://modelc
 - **MCP Server**: Node.js 22 / TypeScript
 - **Business Logic**: Python Lambda (DynamoDB access)
 - **Gateway**: Amazon Bedrock AgentCore Gateway (MCP protocol, No Auth inbound)
+- **Edge**: Amazon CloudFront front door + AWS WAF (CLOUDFRONT scope) + CloudFront Function for OAuth discovery
 - **Infrastructure**: AWS CDK (TypeScript)
 - **Runtime**: Amazon Bedrock AgentCore Runtime (NODEJS_22)
 
@@ -51,7 +52,8 @@ You will be able to interact with the app with requests like:
 **How it works:**
 | Component | Purpose |
 |-----------|---------|
-| **AgentCore Gateway** | Public MCP endpoint for AI hosts — aggregates MCP targets, handles tool discovery, and enforces WAF rules |
+| **CloudFront front door + WAF** | The public MCP entry point. CloudFront reverse-proxies to the Gateway; the associated WAF Web ACL (CLOUDFRONT scope) enforces the IP allowlist, managed rules and rate limiting at the edge. A CloudFront Function answers OAuth protected-resource discovery with the front-door domain (no Lambda@Edge needed) |
+| **AgentCore Gateway** | MCP endpoint behind the front door — aggregates MCP targets and handles tool discovery |
 | **AgentCore Runtime (MCP Server)** | Managed runtime hosting the MCP server (Node.js 22) — handles MCP protocol, tool definitions, structured output, widget resources, and delegates business operations to the service Lambda |
 | **Unicorn Rental Service** (Python) | Lambda function that implements business logic (list, book, view, return unicorns) with DynamoDB access |
 | **DynamoDB** | Stores unicorn inventory and booking records |
@@ -61,16 +63,16 @@ You will be able to interact with the app with requests like:
 
 #### Registration (Connecting the MCP App to an AI Host)
 
-1. **You provide the App details** to the AI host (ChatGPT, Claude, etc.), including the MCP Server URL — the AgentCore Gateway endpoint.
-2. **The AI host** sends MCP `tools/list` and `resources/list` requests to the Gateway URL to discover available capabilities.
+1. **You provide the App details** to the AI host (ChatGPT, Claude, etc.), including the MCP Server URL — the CloudFront front-door endpoint (`GatewayResourceUrl` output).
+2. **The AI host** sends MCP `tools/list` and `resources/list` requests to the front-door URL. CloudFront evaluates them against the WAF Web ACL and forwards allowed requests to the AgentCore Gateway.
 3. **AgentCore Gateway** forwards the requests to the AgentCore Runtime via the configured MCP Server target (authenticated with IAM SigV4).
 4. **AgentCore Runtime (MCP Server)** receives the requests. The MCP App hosted on it defines MCP tools (e.g., `list_unicorns`, `book_unicorn`) and MCP resources (e.g., widget HTML templates). It responds with the full list of tools and resources.
 5. **The AI host** receives the tool and resource definitions and may cache them for future use, enabling tool invocation and widget rendering in subsequent interactions.
 
 #### Request Flow (Tool Calls)
 
-1. **The MCP host** (ChatGPT, Claude, etc.) sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the AgentCore Gateway URL.
-1. **AgentCore Gateway** receives the request. The associated WAF Web ACL evaluates the request against IP allowlist rules, rate limiting, and managed rule sets. Blocked requests are rejected before reaching any target.
+1. **The MCP host** (ChatGPT, Claude, etc.) sends an MCP JSON-RPC request (e.g., `tools/call` with `list_unicorns`) to the CloudFront front-door URL.
+1. **CloudFront** receives the request. The associated WAF Web ACL evaluates it against IP allowlist rules, rate limiting, and managed rule sets — blocked requests are rejected at the edge, before ever reaching AWS Region infrastructure. Allowed requests are proxied (caching disabled) to the AgentCore Gateway.
 1. **AgentCore Gateway** forwards the MCP request to the AgentCore Runtime via the configured MCP Server target, authenticating with IAM (SigV4).
 1. **AgentCore Runtime (MCP Server)** receives the MCP request and invokes the Unicorn Service Lambda.
 1. **Unicorn Service Lambda** executes the business logic against DynamoDB and returns the results.
@@ -115,7 +117,7 @@ Useful variations:
 
 ### Verify your deployment
 
-The Gateway sits behind AWS WAF with a **default-deny** policy that only allows the ChatGPT and Claude egress ranges (see [Security](#security)). A useful consequence is that the endpoint is not publicly reachable — but it also means **you cannot call your own endpoint** after deploying: every request returns `HTTP 403`.
+The Gateway sits behind a CloudFront front door protected by AWS WAF with a **default-deny** policy that only allows the ChatGPT and Claude egress ranges (see [Security](#security)). A useful consequence is that the endpoint is not publicly reachable — but it also means **you cannot call your own endpoint** after deploying: every request returns `HTTP 403`.
 
 To smoke-test it anyway:
 
@@ -198,7 +200,7 @@ CDK will:
 4. Create the IAM role for AgentCore with S3 read and Lambda invoke permissions
 5. Create the AgentCore Runtime (MCP Server) pointing to the service Lambda
 6. Deploy the **AgentCore Gateway** with No Auth inbound and MCP Server target (IAM outbound auth)
-7. Associate the **WAF Web ACL** with the Gateway (IP allowlist + managed rules)
+7. Deploy the **WAF Web ACL** (CLOUDFRONT scope, `EdgeWafStack` in us-east-1) and a **CloudFront front door** for the Gateway with the Web ACL attached, plus a **CloudFront Function** that serves `/.well-known/oauth-protected-resource` with the front-door domain
 8. Apply a **resource-based policy** restricting runtime invocation to the Gateway only
 
 Note the outputs printed after deployment — you'll need the `GatewayResourceUrl` to connect an MCP host.
@@ -216,9 +218,9 @@ Both guides cover configuration steps, demo prompts, and troubleshooting. You'll
 
 This project implements multiple layers of security to protect the MCP endpoint and backend services:
 
-### 1. WAF IP Allowlisting (AgentCore Gateway)
+### 1. WAF IP Allowlisting (CloudFront front door)
 
-AWS WAF is associated with the AgentCore Gateway with a **default-deny** policy. Only requests originating from allowlisted IP ranges are permitted through. The deployed stack includes outbound IP ranges for both ChatGPT ([OpenAI outbound IPs](https://openai.com/chatgpt-actions.json)) and Claude ([Anthropic outbound IPs](https://docs.anthropic.com/en/api/ip-addresses)). To connect additional MCP hosts or for testing the MCP server directly using tools like MCP Inspector, add their outbound IP ranges to the WAF IP set.
+AWS WAF (CLOUDFRONT scope, deployed in us-east-1) is associated with the CloudFront distribution in front of the AgentCore Gateway, with a **default-deny** policy. Only requests originating from allowlisted IP ranges are permitted through. The deployed stack includes outbound IP ranges for both ChatGPT ([OpenAI outbound IPs](https://openai.com/chatgpt-actions.json)) and Claude ([Anthropic outbound IPs](https://docs.anthropic.com/en/api/ip-addresses)). To connect additional MCP hosts or for testing the MCP server directly using tools like MCP Inspector, add their outbound IP ranges to the WAF IP set.
 
 ### 2. WAF Managed Rules (Common Attack Protection)
 
@@ -230,17 +232,23 @@ AWS WAF is associated with the AgentCore Gateway with a **default-deny** policy.
 
 The AgentCore Gateway authenticates to the AgentCore Runtime using IAM (SigV4 signing). The Gateway's execution role is granted `bedrock-agentcore:InvokeAgentRuntime` permission on the runtime ARN.
 
-### 4. Resource-Based Policy (AgentCore Runtime)
+### 4. Custom domain readiness (CloudFront Function instead of Lambda@Edge)
+
+The [AgentCore custom-domains guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-custom-domains.html) recommends a Lambda@Edge `ORIGIN_RESPONSE` function to fix the `/.well-known/oauth-protected-resource` discovery document, which otherwise advertises the Gateway's own domain. This sample uses a **CloudFront Function** on the viewer request instead: it generates the discovery response directly at the edge from the request's `Host` header, so it is correct for the default `*.cloudfront.net` domain and for any custom domain you attach later — at a fraction of Lambda@Edge's cost and latency, with no us-east-1 Lambda replication. If you switch the Gateway to an OAuth (e.g. Amazon Cognito) inbound authorizer, add the issuer to `authorization_servers` in `infrastructure/cdk/lib/functions/oauth-discovery.js`.
+
+> **Known limitation:** the Gateway's own `*.gateway.bedrock-agentcore.*` URL (the `GatewayDirectUrl` output) remains reachable and bypasses CloudFront/WAF, since WAF is no longer associated with the Gateway itself and the Gateway uses No Auth inbound. Do not distribute that URL; for production, use an inbound authorizer (OAuth/Cognito) on the Gateway so direct calls are rejected.
+
+### 5. Resource-Based Policy (AgentCore Runtime)
 
 A resource-based access policy is attached directly to the AgentCore Runtime. It explicitly allows only the AgentCore Gateway's execution role to invoke the runtime, and denies all other principals. This ensures the runtime cannot be accessed directly, bypassing the Gateway and its WAF protections.
 
 ## Cleanup
 
-The deployed stack has standing costs even when idle — the WAF Web ACL, the CloudFront distribution and the AgentCore Runtime all bill while they exist. Tear everything down when you are finished:
+The deployed stacks have standing costs even when idle — the WAF Web ACL, the CloudFront distributions and the AgentCore Runtime all bill while they exist. Tear everything down when you are finished:
 
 ```bash
 cd infrastructure/cdk
-npx cdk destroy
+npx cdk destroy --all
 ```
 
 Deletion takes a few minutes, again mostly waiting on CloudFront. The DynamoDB tables and S3 buckets are configured to delete with the stack, so nothing is left behind.

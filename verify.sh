@@ -2,14 +2,16 @@
 # =============================================================================
 # Verify Script: smoke-test the deployed MCP endpoint
 #
-# The Gateway sits behind AWS WAF with a default-deny policy that only allows
-# the ChatGPT and Claude egress ranges. That means you cannot call your own
-# endpoint straight after deploying — every request returns HTTP 403. This
-# script closes that gap:
+# The Gateway sits behind a CloudFront front door protected by AWS WAF
+# (CLOUDFRONT scope, deployed in us-east-1) with a default-deny policy that
+# only allows the ChatGPT and Claude egress ranges. That means you cannot call
+# your own endpoint straight after deploying — every request returns HTTP 403.
+# This script closes that gap:
 #
-#   1. Reads the Gateway URL from the deployed stack outputs
-#   2. Temporarily adds your public IP to the WAF allowlist
-#   3. Runs initialize -> tools/list -> tools/call list_unicorns
+#   1. Reads the front-door MCP URL from the deployed stack outputs
+#   2. Confirms WAF blocks unlisted IPs, then temporarily allowlists yours
+#   3. Runs initialize -> tools/list -> tools/call list_unicorns, plus the
+#      OAuth protected-resource discovery endpoint (CloudFront Function)
 #   4. Removes your IP again (always, even if a test fails or you Ctrl-C)
 #
 # Usage:
@@ -81,13 +83,26 @@ echo ""
 # =============================================================================
 echo -e "${GREEN}[2/4] Allowlisting your IP in WAF...${NC}"
 
-IP_SET_NAME="$(aws wafv2 list-ip-sets --scope REGIONAL --region "$REGION" \
+# The Web ACL is CLOUDFRONT-scoped, so all WAF API calls go to us-east-1
+# regardless of where the application stack deployed.
+WAF_REGION="us-east-1"
+
+# Prove the WAF front door is actually enforcing before poking holes in it.
+BLOCKED_CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 30 -X POST "$GATEWAY_URL" \
+  -H "Content-Type: application/json" -d '{}' || true)"
+if [ "$BLOCKED_CODE" = "403" ]; then
+  pass "WAF default-deny (got 403 before allowlisting)"
+else
+  bad "WAF default-deny — expected 403 before allowlisting, got '$BLOCKED_CODE'"
+fi
+
+IP_SET_NAME="$(aws wafv2 list-ip-sets --scope CLOUDFRONT --region "$WAF_REGION" \
   --query "IPSets[?contains(Name, 'chatgpt-ips')].Name | [0]" --output text 2>/dev/null || true)"
-IP_SET_ID="$(aws wafv2 list-ip-sets --scope REGIONAL --region "$REGION" \
+IP_SET_ID="$(aws wafv2 list-ip-sets --scope CLOUDFRONT --region "$WAF_REGION" \
   --query "IPSets[?contains(Name, 'chatgpt-ips')].Id | [0]" --output text 2>/dev/null || true)"
 
 [ -n "$IP_SET_ID" ] && [ "$IP_SET_ID" != "None" ] \
-  || fail "Could not find the WAF IP set for this stack in $REGION."
+  || fail "Could not find the CLOUDFRONT-scope WAF IP set for this stack in $WAF_REGION."
 
 MY_IP="$(curl -fsS -m 10 https://checkip.amazonaws.com | tr -d '[:space:]')" \
   || fail "Could not determine your public IP address."
@@ -97,14 +112,14 @@ MY_CIDR="${MY_IP}/32"
 # WAF requires the current lock token, so always re-read immediately before writing.
 update_ip_set() {
   local mode="$1"  # add | remove
-  python3 - "$REGION" "$IP_SET_NAME" "$IP_SET_ID" "$MY_CIDR" "$mode" <<'PY'
+  python3 - "$WAF_REGION" "$IP_SET_NAME" "$IP_SET_ID" "$MY_CIDR" "$mode" <<'PY'
 import json, subprocess, sys
 region, name, ip_id, cidr, mode = sys.argv[1:6]
 
 def aws(*args):
     return subprocess.run(["aws", *args], check=True, capture_output=True, text=True).stdout
 
-info = json.loads(aws("wafv2", "get-ip-set", "--scope", "REGIONAL", "--region", region,
+info = json.loads(aws("wafv2", "get-ip-set", "--scope", "CLOUDFRONT", "--region", region,
                       "--name", name, "--id", ip_id))
 addrs = list(info["IPSet"]["Addresses"])
 lock = info["LockToken"]
@@ -118,7 +133,7 @@ else:
         print("already-absent"); sys.exit(0)
     addrs = [a for a in addrs if a != cidr]
 
-aws("wafv2", "update-ip-set", "--scope", "REGIONAL", "--region", region,
+aws("wafv2", "update-ip-set", "--scope", "CLOUDFRONT", "--region", region,
     "--name", name, "--id", ip_id, "--lock-token", lock, "--addresses", *addrs)
 print("ok")
 PY
@@ -145,8 +160,8 @@ trap cleanup EXIT INT TERM
 update_ip_set add >/dev/null
 IP_ADDED="true"
 echo "      Added $MY_CIDR to '$IP_SET_NAME'"
-echo "      Waiting for the WAF rule to propagate..."
-sleep 20
+echo "      Waiting for the WAF rule to propagate to the edge..."
+sleep 30
 echo ""
 
 # =============================================================================
@@ -206,6 +221,17 @@ except Exception:
   else
     bad "tools/call list_unicorns — request failed"
   fi
+fi
+
+# The CloudFront Function must answer OAuth discovery with the front-door
+# domain (not the *.gateway.bedrock-agentcore.* origin domain).
+FRONT_HOST="$(printf '%s' "$GATEWAY_URL" | sed -E 's#https://([^/]+).*#\1#')"
+DISCOVERY_URL="https://${FRONT_HOST}/.well-known/oauth-protected-resource"
+if RESP="$(curl -fsS -m 30 "$DISCOVERY_URL" 2>/dev/null)" \
+   && printf '%s' "$RESP" | grep -q "https://${FRONT_HOST}/mcp"; then
+  pass "oauth-protected-resource discovery returns the front-door domain"
+else
+  bad "oauth-protected-resource discovery — unexpected response: $(printf '%s' "${RESP:-no response}" | head -c 200)"
 fi
 
 # cleanup() runs here via the EXIT trap, then we report.

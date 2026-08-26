@@ -10,7 +10,9 @@
  *   4. IAM Role for AgentCore Runtime
  *   5. AgentCore Runtime (MCP Server) via direct code deploy (Node.js 22)
  *   6. AgentCore Gateway (No Auth inbound, MCP target pointing to Runtime)
- *   7. WAF Web ACL — ChatGPT/Claude IP allowlist + AWS Managed Rules
+ *   7. CloudFront front door for the Gateway — WAF (CLOUDFRONT scope, from
+ *      EdgeWafStack in us-east-1) + CloudFront Function that fixes the OAuth
+ *      protected-resource discovery response (replaces Lambda@Edge)
  */
 
 import * as cdk from "aws-cdk-lib";
@@ -21,7 +23,6 @@ import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
 import { NagSuppressions } from "cdk-nag";
@@ -30,6 +31,8 @@ import * as path from "path";
 
 interface AgentCoreMcpStackProps extends cdk.StackProps {
   projectName: string;
+  /** ARN of the CLOUDFRONT-scope WAF Web ACL (created in us-east-1 by EdgeWafStack). */
+  webAclArn: string;
 }
 
 export class AgentCoreMcpStack extends cdk.Stack {
@@ -472,186 +475,85 @@ export class AgentCoreMcpStack extends cdk.Stack {
     runtimeMcpTarget.node.addDependency(runtimeResourcePolicy);
 
     // ----------------------------------------------------------------
-    // 7. WAF — IP Allowlist + Basic Protection
+    // 7. CloudFront front door for the Gateway
+    //
+    // The Gateway keeps No Auth inbound; all edge protection moves to a
+    // CloudFront distribution in front of it:
+    //   - WAF Web ACL (CLOUDFRONT scope, from EdgeWafStack in us-east-1)
+    //     with the ChatGPT/Claude IP allowlist, managed rules and rate limit
+    //   - A CloudFront Function that generates the OAuth protected-resource
+    //     discovery response with the front-door domain. The AgentCore
+    //     custom-domains guide does this with Lambda@Edge; a CloudFront
+    //     Function is cheaper and simpler since it never leaves the edge.
+    //
+    // To attach a custom domain later, add `domainNames` + `certificate`
+    // to the distribution per the AgentCore custom-domains guide:
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-custom-domains.html
     // ----------------------------------------------------------------
 
-    // ChatGPT Actions outbound IP ranges (source: https://openai.com/chatgpt-actions.json)
-    const chatGptIpSet = new wafv2.CfnIPSet(this, "ChatGptIpSet", {
-      name: `${project}-chatgpt-ips`,
-      scope: "REGIONAL",
-      ipAddressVersion: "IPV4",
-      addresses: [
-        "104.210.139.192/28", "104.210.139.224/28", "13.65.138.112/28",
-        "13.65.138.96/28", "13.67.72.16/28", "13.70.107.160/28",
-        "13.71.2.208/28", "13.76.115.224/28", "13.76.116.80/28",
-        "13.76.32.208/28", "13.83.237.176/28", "132.196.82.48/28",
-        "135.119.134.128/28", "135.119.134.192/28", "135.220.73.208/28",
-        "135.237.133.48/28", "137.135.191.176/28", "15.168.252.168/32",
-        "172.170.8.208/28", "172.177.53.240/28", "172.183.143.224/28",
-        "172.196.40.208/28", "172.202.102.112/28", "172.204.16.64/28",
-        "172.212.159.64/28", "172.213.11.144/28", "191.233.1.128/28",
-        "191.233.1.224/28", "191.233.196.112/28", "191.234.167.128/28",
-        "191.235.98.144/28", "191.237.249.64/28", "20.0.53.96/28",
-        "20.102.212.144/28", "20.113.218.16/28", "20.125.112.224/28",
-        "20.168.7.192/28", "20.168.7.240/28", "20.169.72.112/28",
-        "20.169.72.96/28", "20.169.78.208/28", "20.169.78.48/28",
-        "20.169.78.64/28", "20.169.78.80/28", "20.169.78.96/28",
-        "20.169.86.224/28", "20.17.108.96/28", "20.172.29.32/28",
-        "20.193.50.32/28", "20.194.0.208/28", "20.194.157.176/28",
-        "20.198.67.96/28", "20.203.245.32/28", "20.206.107.192/28",
-        "20.210.154.128/28", "20.210.174.208/28", "20.215.187.208/28",
-        "20.215.214.16/28", "20.215.219.208/28", "20.215.220.128/28",
-        "20.215.220.144/28", "20.215.220.160/28", "20.215.220.64/28",
-        "20.215.220.80/28", "20.227.140.32/28", "20.228.106.176/28",
-        "20.235.75.208/28", "20.235.87.224/28", "20.249.63.208/28",
-        "20.42.250.32/28", "20.44.100.224/28", "20.45.178.144/28",
-        "20.55.229.144/28", "20.57.199.192/28", "20.63.221.64/28",
-        "23.102.141.32/28", "23.97.109.224/28", "23.98.186.64/28",
-        "23.98.186.96/28", "4.151.119.48/28", "4.151.71.176/28",
-        "4.189.118.208/28", "4.196.198.80/28", "4.197.115.112/28",
-        "4.197.19.176/28", "4.197.64.0/28", "4.197.64.48/28",
-        "4.205.128.176/28", "4.226.226.32/28", "40.67.183.160/28",
-        "40.67.183.176/28", "40.81.134.128/28", "40.84.181.32/28",
-        "44.249.227.138/32", "48.193.44.32/28", "51.116.2.64/28",
-        "52.148.129.32/28", "52.153.130.48/28", "52.165.212.48/28",
-        "52.17.188.55/32", "52.172.129.160/28", "52.172.251.112/28",
-        "52.173.123.0/28", "52.173.221.16/28", "52.173.234.16/28",
-        "52.173.234.80/28", "52.176.139.176/28", "52.190.137.144/28",
-        "52.190.137.16/28", "52.190.139.48/28", "52.190.142.64/28",
-        "52.208.217.159/32", "52.231.30.48/28", "52.231.39.144/28",
-        "52.231.39.192/28", "52.242.132.224/28", "52.242.132.240/28",
-        "52.242.245.208/28", "52.252.113.240/28", "52.255.109.112/28",
-        "52.255.109.128/28", "52.255.109.144/28", "52.255.109.80/28",
-        "52.255.109.96/28", "52.255.111.0/28", "52.255.111.16/28",
-        "52.255.111.32/28", "52.43.161.225/32", "56.155.71.179/32",
-        "57.151.131.224/28", "57.154.174.112/28", "57.154.187.32/28",
-        "68.154.28.96/28", "68.220.57.64/28", "68.221.67.160/28",
-        "68.221.67.240/28", "68.221.75.16/28", "74.226.253.160/28",
-        "74.249.86.176/28", "74.7.35.112/28", "74.7.35.48/28",
-        "74.7.36.64/28", "74.7.36.80/28", "74.7.36.96/28",
-        "9.160.163.224/28", "9.234.96.192/28",
-      ],
+    // gateway.gatewayUrl is "https://<id>.gateway.bedrock-agentcore.<region>.amazonaws.com/mcp";
+    // CloudFront origins need the bare hostname.
+    const gatewayHostName = cdk.Fn.select(2, cdk.Fn.split("/", gateway.gatewayUrl!));
+
+    const gatewayOrigin = new origins.HttpOrigin(gatewayHostName, {
+      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
     });
 
-    // Anthropic/Claude outbound IP ranges (source: https://docs.anthropic.com/claude/reference/ip-addresses)
-    const claudeIpSet = new wafv2.CfnIPSet(this, "ClaudeIpSet", {
-      name: `${project}-claude-ips`,
-      scope: "REGIONAL",
-      ipAddressVersion: "IPV4",
-      addresses: [
-        "160.79.104.0/21",
-      ],
+    const oauthDiscoveryFn = new cloudfront.Function(this, "OauthDiscoveryFunction", {
+      functionName: `${project}-oauth-discovery`,
+      code: cloudfront.FunctionCode.fromFile({
+        filePath: path.join(__dirname, "functions", "oauth-discovery.js"),
+      }),
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+      comment: "Returns the OAuth protected-resource discovery document with the front-door domain",
     });
 
-    // Web ACL with IP allowlist + AWS Managed Rules for common threats
-    const webAcl = new wafv2.CfnWebACL(this, "ApiWafAcl", {
-      name: `${project}-gateway-waf`,
-      scope: "REGIONAL",
-      defaultAction: { block: {} },
-      visibilityConfig: {
-        cloudWatchMetricsEnabled: true,
-        metricName: `${project}-waf-metrics`,
-        sampledRequestsEnabled: true,
+    const gatewayCdn = new cloudfront.Distribution(this, "GatewayCdn", {
+      defaultBehavior: {
+        origin: gatewayOrigin,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+        // A reverse proxy for a dynamic MCP endpoint must never cache...
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        // ...but must forward everything else the MCP protocol needs
+        // (Content-Type, Accept, Mcp-Session-Id, ...). The Host header is
+        // excluded so the TLS handshake with the Gateway origin succeeds.
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       },
-      rules: [
-        // Rule 1: Allow ChatGPT IPs
-        {
-          name: "AllowChatGptIPs",
-          priority: 1,
-          action: { allow: {} },
-          statement: {
-            ipSetReferenceStatement: {
-              arn: chatGptIpSet.attrArn,
+      additionalBehaviors: {
+        // OAuth discovery is answered entirely at the edge by the CloudFront
+        // Function — the request never reaches the Gateway.
+        "/.well-known/oauth-protected-resource": {
+          origin: gatewayOrigin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+          functionAssociations: [
+            {
+              function: oauthDiscoveryFn,
+              eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
             },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `${project}-chatgpt-ip-allow`,
-            sampledRequestsEnabled: true,
-          },
+          ],
         },
-        // Rule 2: Allow Claude/Anthropic IPs
-        {
-          name: "AllowClaudeIPs",
-          priority: 2,
-          action: { allow: {} },
-          statement: {
-            ipSetReferenceStatement: {
-              arn: claudeIpSet.attrArn,
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `${project}-claude-ip-allow`,
-            sampledRequestsEnabled: true,
-          },
-        },
-        // Rule 3: AWS Managed Rules — Common Rule Set
-        {
-          name: "AWSManagedRulesCommonRuleSet",
-          priority: 3,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: "AWS",
-              name: "AWSManagedRulesCommonRuleSet",
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `${project}-common-rules`,
-            sampledRequestsEnabled: true,
-          },
-        },
-        // Rule 4: AWS Managed Rules — Known Bad Inputs
-        {
-          name: "AWSManagedRulesKnownBadInputsRuleSet",
-          priority: 4,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: "AWS",
-              name: "AWSManagedRulesKnownBadInputsRuleSet",
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `${project}-known-bad-inputs`,
-            sampledRequestsEnabled: true,
-          },
-        },
-        // Rule 5: Rate limiting — 1000 requests per 5 minutes per IP
-        {
-          name: "RateLimitRule",
-          priority: 5,
-          action: { block: {} },
-          statement: {
-            rateBasedStatement: {
-              limit: 1000,
-              aggregateKeyType: "IP",
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: `${project}-rate-limit`,
-            sampledRequestsEnabled: true,
-          },
-        },
-      ],
-    });
-
-    // Associate WAF Web ACL with the AgentCore Gateway
-    new wafv2.CfnWebACLAssociation(this, "GatewayWafAssociation", {
-      resourceArn: gateway.gatewayArn,
-      webAclArn: webAcl.attrArn,
+      },
+      webAclId: props.webAclArn,
+      httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
+      comment: `${project} gateway front door (WAF + OAuth discovery rewrite)`,
     });
 
     // ----------------------------------------------------------------
     // Outputs
     // ----------------------------------------------------------------
     new cdk.CfnOutput(this, "GatewayResourceUrl", {
-      description: "MCP Server URL — copy and paste this into your AI host (ChatGPT, Claude, etc.)",
+      description: "MCP Server URL (CloudFront front door) — copy and paste this into your AI host (ChatGPT, Claude, etc.)",
+      value: `https://${gatewayCdn.domainName}/mcp`,
+    });
+    new cdk.CfnOutput(this, "GatewayDirectUrl", {
+      description: "Raw AgentCore Gateway URL (bypasses CloudFront/WAF — do not distribute)",
       value: gateway.gatewayUrl!,
+    });
+    new cdk.CfnOutput(this, "GatewayCdnDistributionId", {
+      description: "CloudFront distribution ID for the gateway front door",
+      value: gatewayCdn.distributionId,
     });
     new cdk.CfnOutput(this, "GatewayArn", {
       description: "AgentCore Gateway ARN",
@@ -696,7 +598,14 @@ export class AgentCoreMcpStack extends cdk.Stack {
     // CloudFront — demo serves public unicorn images, no custom domain
     NagSuppressions.addResourceSuppressions(widgetsCdn, [
       { id: "AwsSolutions-CFR1", reason: "Demo app requires global access; geo restrictions not applicable." },
-      { id: "AwsSolutions-CFR2", reason: "Static image CDN for public assets; WAF protection is on the Gateway instead." },
+      { id: "AwsSolutions-CFR2", reason: "Static image CDN for public assets; WAF protection is on the gateway front-door distribution instead." },
+      { id: "AwsSolutions-CFR3", reason: "Demo app — CloudFront access logs not required for sample workload." },
+      { id: "AwsSolutions-CFR4", reason: "No custom domain configured; cannot override default CloudFront viewer certificate TLS policy." },
+    ]);
+
+    // CloudFront gateway front door — WAF attached (CFR2 satisfied); demo has no custom domain
+    NagSuppressions.addResourceSuppressions(gatewayCdn, [
+      { id: "AwsSolutions-CFR1", reason: "Demo app requires global access; geo restrictions not applicable." },
       { id: "AwsSolutions-CFR3", reason: "Demo app — CloudFront access logs not required for sample workload." },
       { id: "AwsSolutions-CFR4", reason: "No custom domain configured; cannot override default CloudFront viewer certificate TLS policy." },
     ]);
