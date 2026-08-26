@@ -72,6 +72,9 @@ public CloudFront `GatewayResourceUrl` stays the same.
 - **IPv6**: CloudFront is dual-stack; the allowlist IP sets are IPv4-only. Any
   manual `curl` you run must use `-4`, or WAF will 403 you from your IPv6
   address even though your IPv4 is allowlisted. `verify.sh` already does this.
+  The same applies to Node-based clients (e.g. MCP Inspector's proxy): launch
+  them with `NODE_OPTIONS=--dns-result-order=ipv4first` or WAF returns its
+  403 "Request blocked" page despite the allowlisted IPv4.
 - **WAF API scope**: all `aws wafv2` calls for this Web ACL need
   `--scope CLOUDFRONT --region us-east-1`, regardless of the app region.
 - **Propagation**: IP set changes take ~30–60 s to reach the edge. Don't
