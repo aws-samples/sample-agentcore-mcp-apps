@@ -73,6 +73,30 @@ GATEWAY_URL="$(aws cloudformation describe-stacks \
   || fail "Could not read GatewayResourceUrl from stack '$STACK_NAME' in $REGION. Has ./deploy.sh finished successfully?"
 
 echo "      $GATEWAY_URL"
+
+# Cognito inbound auth (present only on `-c auth=cognito` deployments): fetch a
+# client_credentials access token so the MCP calls below carry a valid JWT.
+ACCESS_TOKEN=""
+TOKEN_ENDPOINT="$(aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" --region "$REGION" \
+  --query "Stacks[0].Outputs[?OutputKey=='CognitoTokenEndpoint'].OutputValue" \
+  --output text 2>/dev/null || true)"
+if [ -n "$TOKEN_ENDPOINT" ] && [ "$TOKEN_ENDPOINT" != "None" ]; then
+  CLIENT_ID="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='CognitoClientId'].OutputValue" --output text)"
+  POOL_ID="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='CognitoUserPoolId'].OutputValue" --output text)"
+  CLIENT_SECRET="$(aws cognito-idp describe-user-pool-client --region "$REGION" \
+    --user-pool-id "$POOL_ID" --client-id "$CLIENT_ID" \
+    --query 'UserPoolClient.ClientSecret' --output text)"
+  ACCESS_TOKEN="$(curl -4 -fsS -m 20 -X POST "$TOKEN_ENDPOINT" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    -u "${CLIENT_ID}:${CLIENT_SECRET}" \
+    -d 'grant_type=client_credentials&scope=mcp-gateway/invoke' \
+    | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")" \
+    || fail "Could not obtain a Cognito access token from $TOKEN_ENDPOINT."
+  echo "      Cognito auth detected — obtained a client_credentials token"
+fi
 echo ""
 
 # =============================================================================
@@ -88,7 +112,10 @@ echo -e "${GREEN}[2/4] Allowlisting your IP in WAF...${NC}"
 WAF_REGION="us-east-1"
 
 # Prove the WAF front door is actually enforcing before poking holes in it.
-BLOCKED_CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 30 -X POST "$GATEWAY_URL" \
+# All endpoint calls force IPv4 (-4): the allowlist IP sets are IPv4-only, and
+# CloudFront (unlike the regional Gateway endpoint) is dual-stack — a machine
+# with IPv6 would otherwise reach it from an address the allowlist can't match.
+BLOCKED_CODE="$(curl -4 -s -o /dev/null -w '%{http_code}' -m 30 -X POST "$GATEWAY_URL" \
   -H "Content-Type: application/json" -d '{}' || true)"
 if [ "$BLOCKED_CODE" = "403" ]; then
   pass "WAF default-deny (got 403 before allowlisting)"
@@ -104,7 +131,7 @@ IP_SET_ID="$(aws wafv2 list-ip-sets --scope CLOUDFRONT --region "$WAF_REGION" \
 [ -n "$IP_SET_ID" ] && [ "$IP_SET_ID" != "None" ] \
   || fail "Could not find the CLOUDFRONT-scope WAF IP set for this stack in $WAF_REGION."
 
-MY_IP="$(curl -fsS -m 10 https://checkip.amazonaws.com | tr -d '[:space:]')" \
+MY_IP="$(curl -4 -fsS -m 10 https://checkip.amazonaws.com | tr -d '[:space:]')" \
   || fail "Could not determine your public IP address."
 MY_CIDR="${MY_IP}/32"
 
@@ -172,11 +199,30 @@ echo -e "${GREEN}[3/4] Testing the MCP endpoint...${NC}"
 # Tools are exposed through the Gateway as "<target>___<tool>", so discover the
 # real name from tools/list rather than assuming the bare "list_unicorns".
 mcp_call() {
-  curl -fsS -m 45 -X POST "$GATEWAY_URL" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "$1" 2>/dev/null
+  if [ -n "$ACCESS_TOKEN" ]; then
+    curl -4 -fsS -m 45 -X POST "$GATEWAY_URL" \
+      -H "Content-Type: application/json" \
+      -H "Accept: application/json, text/event-stream" \
+      -H "Authorization: Bearer $ACCESS_TOKEN" \
+      -d "$1" 2>/dev/null
+  else
+    curl -4 -fsS -m 45 -X POST "$GATEWAY_URL" \
+      -H "Content-Type: application/json" \
+      -H "Accept: application/json, text/event-stream" \
+      -d "$1" 2>/dev/null
+  fi
 }
+
+# With Cognito auth enabled, an allowlisted request without a token must still
+# be rejected by the Gateway itself (this is what closes the WAF-bypass gap).
+if [ -n "$ACCESS_TOKEN" ]; then
+  NOAUTH_CODE="$(curl -4 -s -o /dev/null -w '%{http_code}' -m 30 -X POST "$GATEWAY_URL" \
+    -H "Content-Type: application/json" -d '{}' || true)"
+  case "$NOAUTH_CODE" in
+    401|403) pass "gateway rejects requests without a Cognito token (HTTP $NOAUTH_CODE)" ;;
+    *)       bad  "gateway accepted an unauthenticated request (HTTP $NOAUTH_CODE)" ;;
+  esac
+fi
 
 INIT_BODY='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"verify.sh","version":"1.0"}}}'
 if RESP="$(mcp_call "$INIT_BODY")" && printf '%s' "$RESP" | grep -q '"protocolVersion"'; then
@@ -227,9 +273,12 @@ fi
 # domain (not the *.gateway.bedrock-agentcore.* origin domain).
 FRONT_HOST="$(printf '%s' "$GATEWAY_URL" | sed -E 's#https://([^/]+).*#\1#')"
 DISCOVERY_URL="https://${FRONT_HOST}/.well-known/oauth-protected-resource"
-if RESP="$(curl -fsS -m 30 "$DISCOVERY_URL" 2>/dev/null)" \
+if RESP="$(curl -4 -fsS -m 30 "$DISCOVERY_URL" 2>/dev/null)" \
    && printf '%s' "$RESP" | grep -q "https://${FRONT_HOST}/mcp"; then
   pass "oauth-protected-resource discovery returns the front-door domain"
+  if [ -n "$ACCESS_TOKEN" ] && ! printf '%s' "$RESP" | grep -q "cognito-idp"; then
+    bad "oauth-protected-resource discovery — Cognito issuer missing from authorization_servers"
+  fi
 else
   bad "oauth-protected-resource discovery — unexpected response: $(printf '%s' "${RESP:-no response}" | head -c 200)"
 fi

@@ -20,6 +20,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
+import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
@@ -27,6 +28,7 @@ import * as cr from "aws-cdk-lib/custom-resources";
 import * as agentcore from "aws-cdk-lib/aws-bedrockagentcore";
 import { NagSuppressions } from "cdk-nag";
 import { Construct } from "constructs";
+import * as fs from "fs";
 import * as path from "path";
 
 interface AgentCoreMcpStackProps extends cdk.StackProps {
@@ -336,19 +338,71 @@ export class AgentCoreMcpStack extends cdk.Stack {
     });
 
     // ----------------------------------------------------------------
-    // 6. AgentCore Gateway — No Auth inbound, MCP Server target
+    // 6. AgentCore Gateway — inbound auth + MCP Server target
+    //
+    // Default: No Auth inbound (the CloudFront front door's WAF provides
+    // IP-based protection). Deploy with `-c auth=cognito` to switch inbound
+    // auth to a Cognito JWT authorizer (client_credentials machine flow) —
+    // this also closes the "call the Gateway URL directly" bypass, because
+    // requests without a valid Cognito token are rejected by the Gateway
+    // itself, not just by the WAF at the edge.
     // ----------------------------------------------------------------
+    const authMode: string = this.node.tryGetContext("auth") || "none";
 
-    // The Gateway uses No Auth for inbound requests (WAF provides IP-based protection)
-    const gateway = new agentcore.Gateway(this, "McpGateway", {
-      gatewayName: `${project}-gateway`,
+    let authorizerConfiguration = agentcore.GatewayAuthorizer.withNoAuth();
+    let cognitoIssuer: string | undefined;
+    let mcpUserPool: cognito.UserPool | undefined;
+    let mcpAuthClient: cognito.UserPoolClient | undefined;
+    let mcpAuthDomain: cognito.UserPoolDomain | undefined;
+    if (authMode === "cognito") {
+      mcpUserPool = new cognito.UserPool(this, "McpUserPool", {
+        userPoolName: `${project}-users`,
+        selfSignUpEnabled: false,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      const invokeScope = new cognito.ResourceServerScope({
+        scopeName: "invoke",
+        scopeDescription: "Invoke MCP tools through the gateway",
+      });
+      const resourceServer = mcpUserPool.addResourceServer("McpResourceServer", {
+        identifier: "mcp-gateway",
+        scopes: [invokeScope],
+      });
+      // Hosted domain is required for the /oauth2/token endpoint
+      mcpAuthDomain = mcpUserPool.addDomain("McpAuthDomain", {
+        cognitoDomain: { domainPrefix: `${project}-${this.account}` },
+      });
+      // Machine-to-machine client: client_credentials flow, secret generated
+      mcpAuthClient = mcpUserPool.addClient("McpAuthClient", {
+        userPoolClientName: `${project}-m2m`,
+        generateSecret: true,
+        oAuth: {
+          flows: { clientCredentials: true },
+          scopes: [cognito.OAuthScope.resourceServer(resourceServer, invokeScope)],
+        },
+      });
+      authorizerConfiguration = agentcore.GatewayAuthorizer.usingCognito({
+        userPool: mcpUserPool,
+        allowedClients: [mcpAuthClient],
+      });
+      cognitoIssuer = `https://cognito-idp.${this.region}.amazonaws.com/${mcpUserPool.userPoolId}`;
+    } else if (authMode !== "none") {
+      throw new Error(`Unsupported -c auth=${authMode}; use "none" or "cognito".`);
+    }
+
+    // The service rejects in-place authorizer-type updates, so the auth mode
+    // is baked into the construct id and gateway name: switching modes
+    // replaces the Gateway (the CloudFront front-door URL stays the same —
+    // its origin just points at the new gateway hostname).
+    const gateway = new agentcore.Gateway(this, authMode === "cognito" ? "McpGatewayJwt" : "McpGateway", {
+      gatewayName: authMode === "cognito" ? `${project}-gateway-jwt` : `${project}-gateway`,
       description: "AgentCore Gateway for Unicorn Rentals MCP Server",
       protocolConfiguration: new agentcore.McpProtocolConfiguration({
         instructions: "Use this gateway to access the Unicorn Rentals MCP tools",
         searchType: agentcore.McpGatewaySearchType.SEMANTIC,
         supportedVersions: [agentcore.MCPProtocolVersion.MCP_2025_03_26],
       }),
-      authorizerConfiguration: agentcore.GatewayAuthorizer.withNoAuth(),
+      authorizerConfiguration,
     });
 
     // The MCP endpoint URL of the AgentCore Runtime
@@ -499,11 +553,16 @@ export class AgentCoreMcpStack extends cdk.Stack {
       protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
     });
 
+    // The function source carries an __AUTH_SERVERS__ placeholder, filled at
+    // synth time: [] for No Auth, or the Cognito issuer for -c auth=cognito.
+    // (The issuer contains a CFN token, so the substitution resolves at deploy.)
+    const oauthDiscoverySource = fs
+      .readFileSync(path.join(__dirname, "functions", "oauth-discovery.js"), "utf8")
+      .split("__AUTH_SERVERS__")
+      .join(cognitoIssuer ? `["${cognitoIssuer}"]` : "[]");
     const oauthDiscoveryFn = new cloudfront.Function(this, "OauthDiscoveryFunction", {
       functionName: `${project}-oauth-discovery`,
-      code: cloudfront.FunctionCode.fromFile({
-        filePath: path.join(__dirname, "functions", "oauth-discovery.js"),
-      }),
+      code: cloudfront.FunctionCode.fromInline(oauthDiscoverySource),
       runtime: cloudfront.FunctionRuntime.JS_2_0,
       comment: "Returns the OAuth protected-resource discovery document with the front-door domain",
     });
@@ -559,6 +618,20 @@ export class AgentCoreMcpStack extends cdk.Stack {
       description: "AgentCore Gateway ARN",
       value: gateway.gatewayArn,
     });
+    if (mcpUserPool && mcpAuthClient && mcpAuthDomain) {
+      new cdk.CfnOutput(this, "CognitoUserPoolId", {
+        description: "Cognito User Pool ID (gateway inbound JWT authorizer)",
+        value: mcpUserPool.userPoolId,
+      });
+      new cdk.CfnOutput(this, "CognitoClientId", {
+        description: "Cognito app client ID for the client_credentials flow (secret: aws cognito-idp describe-user-pool-client)",
+        value: mcpAuthClient.userPoolClientId,
+      });
+      new cdk.CfnOutput(this, "CognitoTokenEndpoint", {
+        description: "OAuth2 token endpoint — POST grant_type=client_credentials&scope=mcp-gateway/invoke",
+        value: `${mcpAuthDomain.baseUrl()}/oauth2/token`,
+      });
+    }
     new cdk.CfnOutput(this, "WidgetBaseUrl", {
       description: "CloudFront URL for images",
       value: `https://${widgetsCdn.domainName}`,
@@ -602,6 +675,16 @@ export class AgentCoreMcpStack extends cdk.Stack {
       { id: "AwsSolutions-CFR3", reason: "Demo app — CloudFront access logs not required for sample workload." },
       { id: "AwsSolutions-CFR4", reason: "No custom domain configured; cannot override default CloudFront viewer certificate TLS policy." },
     ]);
+
+    // Cognito (only with -c auth=cognito) — machine-to-machine pool, no human users
+    if (mcpUserPool) {
+      NagSuppressions.addResourceSuppressions(mcpUserPool, [
+        { id: "AwsSolutions-COG1", reason: "Machine-to-machine pool (client_credentials only) — no human passwords exist." },
+        { id: "AwsSolutions-COG2", reason: "Machine-to-machine pool — MFA does not apply to the client_credentials flow." },
+        { id: "AwsSolutions-COG3", reason: "Demo app — advanced security mode adds cost; no user accounts to protect." },
+        { id: "AwsSolutions-COG8", reason: "Machine-to-machine pool with no sign-ins — the Plus tier's sign-in protections add cost with nothing to protect." },
+      ]);
+    }
 
     // CloudFront gateway front door — WAF attached (CFR2 satisfied); demo has no custom domain
     NagSuppressions.addResourceSuppressions(gatewayCdn, [
@@ -684,7 +767,7 @@ export class AgentCoreMcpStack extends cdk.Stack {
 
     // Gateway role — needs InvokeAgentRuntime with wildcard qualifier on the runtime ARN
     NagSuppressions.addResourceSuppressionsByPath(this,
-      "/AgentCoreMcpStack/McpGateway/ServiceRole/DefaultPolicy/Resource",
+      `/AgentCoreMcpStack/${authMode === "cognito" ? "McpGatewayJwt" : "McpGateway"}/ServiceRole/DefaultPolicy/Resource`,
       [{ id: "AwsSolutions-IAM5", reason: "Gateway role requires bedrock-agentcore:InvokeAgentRuntime on runtime ARN with wildcard qualifier for endpoint routing.", appliesTo: ["Resource::<McpRuntime.AgentRuntimeArn>*"] }],
     );
   }

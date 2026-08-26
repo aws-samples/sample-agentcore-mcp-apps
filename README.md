@@ -113,6 +113,7 @@ Useful variations:
 ```bash
 ./deploy.sh --require-approval never       # skip the IAM approval prompt
 ./deploy.sh -c projectName=my-unicorns     # override the default 'unicorn-mcp' project name
+./deploy.sh -c auth=cognito                # Cognito JWT inbound auth on the Gateway (see Security)
 ```
 
 ### Verify your deployment
@@ -236,7 +237,28 @@ The AgentCore Gateway authenticates to the AgentCore Runtime using IAM (SigV4 si
 
 The [AgentCore custom-domains guide](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-custom-domains.html) recommends a Lambda@Edge `ORIGIN_RESPONSE` function to fix the `/.well-known/oauth-protected-resource` discovery document, which otherwise advertises the Gateway's own domain. This sample uses a **CloudFront Function** on the viewer request instead: it generates the discovery response directly at the edge from the request's `Host` header, so it is correct for the default `*.cloudfront.net` domain and for any custom domain you attach later — at a fraction of Lambda@Edge's cost and latency, with no us-east-1 Lambda replication. If you switch the Gateway to an OAuth (e.g. Amazon Cognito) inbound authorizer, add the issuer to `authorization_servers` in `infrastructure/cdk/lib/functions/oauth-discovery.js`.
 
-> **Known limitation:** the Gateway's own `*.gateway.bedrock-agentcore.*` URL (the `GatewayDirectUrl` output) remains reachable and bypasses CloudFront/WAF, since WAF is no longer associated with the Gateway itself and the Gateway uses No Auth inbound. Do not distribute that URL; for production, use an inbound authorizer (OAuth/Cognito) on the Gateway so direct calls are rejected.
+> **Known limitation (default deployment):** the Gateway's own `*.gateway.bedrock-agentcore.*` URL (the `GatewayDirectUrl` output) remains reachable and bypasses CloudFront/WAF, since WAF is no longer associated with the Gateway itself and the Gateway uses No Auth inbound. Do not distribute that URL — or deploy with `-c auth=cognito` (below), which closes the bypass.
+
+### 4b. Optional: Cognito JWT inbound auth (`-c auth=cognito`)
+
+Deploying with `./deploy.sh -c auth=cognito` switches the Gateway's inbound authorizer from No Auth to **Amazon Cognito**:
+
+- A machine-to-machine **Cognito User Pool** (no sign-ups, no human users), a resource server exposing the `mcp-gateway/invoke` scope, a hosted domain for the `/oauth2/token` endpoint, and an app client with the **client_credentials** flow.
+- The Gateway validates every request's `Authorization: Bearer` JWT against the pool (`GatewayAuthorizer.usingCognito`), restricted to that app client. Requests without a valid token are rejected **by the Gateway itself**, so the direct-URL bypass above no longer applies — WAF at the edge and JWT auth at the Gateway become independent layers.
+- The CloudFront Function automatically advertises the Cognito issuer in `authorization_servers` of the `/.well-known/oauth-protected-resource` document.
+
+Fetch a token and call the endpoint (outputs `CognitoTokenEndpoint`, `CognitoClientId`, `CognitoUserPoolId`):
+
+```bash
+SECRET=$(aws cognito-idp describe-user-pool-client --user-pool-id <CognitoUserPoolId> \
+  --client-id <CognitoClientId> --query 'UserPoolClient.ClientSecret' --output text)
+TOKEN=$(curl -s -X POST <CognitoTokenEndpoint> -u "<CognitoClientId>:$SECRET" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=client_credentials&scope=mcp-gateway/invoke' | jq -r .access_token)
+curl -4 -X POST <GatewayResourceUrl> -H "Authorization: Bearer $TOKEN" ...
+```
+
+> Note: ChatGPT/Claude connectors negotiate OAuth via dynamic client registration, which Cognito does not offer — the Cognito mode is aimed at programmatic MCP clients (and at demonstrating the pattern); the default No Auth + IP-allowlist mode is what the ChatGPT/Claude setup guides assume.
 
 ### 5. Resource-Based Policy (AgentCore Runtime)
 

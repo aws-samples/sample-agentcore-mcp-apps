@@ -13,9 +13,21 @@
  *
  * The Host header is used so the answer is correct for both the default
  * *.cloudfront.net domain and any custom domain attached to the distribution.
+ *
+ * The AUTH_SERVERS placeholder below is substituted at synth time by the CDK
+ * stack: it becomes [] when the Gateway uses No Auth inbound, and the Cognito
+ * issuer URL array when deployed with -c auth=cognito.
  */
+var AUTH_SERVERS = __AUTH_SERVERS__;
+
 function handler(event) {
   var host = event.request.headers.host.value;
+  var doc = {
+    resource: 'https://' + host + '/mcp'
+  };
+  if (AUTH_SERVERS.length > 0) {
+    doc.authorization_servers = AUTH_SERVERS;
+  }
   return {
     statusCode: 200,
     statusDescription: 'OK',
@@ -23,11 +35,6 @@ function handler(event) {
       'content-type': { value: 'application/json' },
       'cache-control': { value: 'no-store' }
     },
-    // This sample's Gateway uses No Auth inbound, so only the resource URL is
-    // returned. If your Gateway uses an OAuth authorizer, add its issuer here:
-    //   authorization_servers: ['https://my-org.okta.com/oauth2/default']
-    body: JSON.stringify({
-      resource: 'https://' + host + '/mcp'
-    })
+    body: JSON.stringify(doc)
   };
 }
