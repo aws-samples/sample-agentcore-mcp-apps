@@ -400,7 +400,12 @@ export class AgentCoreMcpStack extends cdk.Stack {
       protocolConfiguration: new agentcore.McpProtocolConfiguration({
         instructions: "Use this gateway to access the Unicorn Rentals MCP tools",
         searchType: agentcore.McpGatewaySearchType.SEMANTIC,
-        supportedVersions: [agentcore.MCPProtocolVersion.MCP_2025_03_26],
+        // 2025-06-18 is the modern stateless streamable-HTTP revision (what
+        // current MCP clients negotiate); 2025-03-26 stays for older hosts.
+        supportedVersions: [
+          agentcore.MCPProtocolVersion.MCP_2025_06_18,
+          agentcore.MCPProtocolVersion.MCP_2025_03_26,
+        ],
       }),
       authorizerConfiguration,
     });

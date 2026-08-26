@@ -128,7 +128,10 @@ To smoke-test it anyway:
 
 This temporarily adds your public IP to the WAF allowlist, runs `initialize` → `tools/list` → `tools/call list_unicorns` against the live endpoint, prints a pass/fail summary, then **removes your IP again** (including if a check fails or you interrupt it).
 
-If you want to keep poking at the endpoint yourself — for example with [MCP Inspector](https://github.com/modelcontextprotocol/inspector) — use `./verify.sh --keep-ip` and remember to remove the entry afterwards.
+If you want to keep poking at the endpoint yourself, use `./verify.sh --keep-ip` (remember to remove the entry afterwards — rerunning plain `./verify.sh` does it) and then:
+
+- **[MCP Inspector](https://github.com/modelcontextprotocol/inspector)** — run `./inspect.sh`. It prints the endpoint URL and (on Cognito deployments) the ready-to-paste `Authorization` header, then launches Inspector with IPv4-first DNS. That DNS flag matters: CloudFront is dual-stack but the WAF allowlist is IPv4-only, so Node-based clients on IPv6 networks get `403 Request blocked` without it. For the same reason, use `curl -4` for manual calls.
+- **Cognito token** (`-c auth=cognito` deployments) — `TOKEN=$(./get-token.sh)` mints a 1-hour client_credentials token; pass it as `Authorization: Bearer $TOKEN`.
 
 > **Note on tool names:** through the Gateway, tools are exposed as `<target>___<tool>` (for example `unicorn-mcp-runtime-target___list_unicorns`), and the Gateway also injects its own `x_amz_bedrock_agentcore_search` tool. AI hosts handle this for you; it only matters if you are calling the MCP API directly.
 

@@ -53,7 +53,9 @@ public CloudFront `GatewayResourceUrl` stays the same.
 ## Test end to end
 
 ```bash
-./verify.sh          # add --keep-ip to keep your IP allowlisted afterwards
+./verify.sh          # automated e2e; add --keep-ip to keep your IP allowlisted
+./inspect.sh         # interactive testing with MCP Inspector (run verify --keep-ip first)
+./get-token.sh       # print a Cognito access token (Cognito deployments only)
 ```
 
 `verify.sh` does the whole e2e loop and cleans up after itself:
@@ -83,11 +85,16 @@ public CloudFront `GatewayResourceUrl` stays the same.
   (e.g. `unicorn-mcp-runtime-target___list_unicorns`); the Gateway also injects
   its own `x_amz_bedrock_agentcore_search` tool.
 - **Manual MCP calls** need `Accept: application/json, text/event-stream` and,
-  in Cognito mode, `Authorization: Bearer <token>` where the token comes from
-  `POST $CognitoTokenEndpoint` with
-  `grant_type=client_credentials&scope=mcp-gateway/invoke` and HTTP basic auth
-  `clientId:clientSecret` (secret via
-  `aws cognito-idp describe-user-pool-client`).
+  in Cognito mode, `Authorization: Bearer $(./get-token.sh)` (tokens last
+  1 hour; the script wraps the describe-user-pool-client + token-endpoint
+  dance).
+- **MCP Inspector**: use `./inspect.sh` — it prints the endpoint URL and the
+  Authorization header (clipboard on macOS) and launches Inspector with
+  IPv4-first DNS. In Inspector choose transport **Streamable HTTP**. Your IP
+  must already be allowlisted (`./verify.sh --keep-ip`).
+- **Protocol versions**: the Gateway accepts MCP `2025-06-18` (modern
+  stateless streamable HTTP) and `2025-03-26`. If a "modern/stateless" client
+  fails while "legacy/auto" works, something reintroduced a version pin.
 
 ## Clean up
 
