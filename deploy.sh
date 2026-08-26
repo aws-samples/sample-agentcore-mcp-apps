@@ -112,12 +112,23 @@ else
     npx cdk bootstrap
 fi
 
+# The CLOUDFRONT-scope WAF stack always deploys to us-east-1, so that region
+# must be bootstrapped too when deploying the app elsewhere.
+if [ "$REGION" != "us-east-1" ]; then
+  if aws cloudformation describe-stacks --stack-name CDKToolkit --region us-east-1 > /dev/null 2>&1; then
+      echo "      CDKToolkit stack found in us-east-1 (WAF stack region)."
+  else
+      echo "      Bootstrapping us-east-1 for the WAF stack..."
+      npx cdk bootstrap "aws://${ACCOUNT}/us-east-1"
+  fi
+fi
+
 echo ""
 
 # =============================================================================
 # Step 5: Deploy
 # =============================================================================
-echo -e "${GREEN}[5/5] Deploying AgentCoreMcpStack...${NC}"
+echo -e "${GREEN}[5/5] Deploying EdgeWafStack (us-east-1) + AgentCoreMcpStack...${NC}"
 echo "      This usually takes 10-20 minutes, occasionally longer. Everything"
 echo "      except CloudFront is done in the first few minutes; the CLI then"
 echo "      looks stalled around 43/49 while CloudFront propagates. That is"
@@ -125,7 +136,8 @@ echo "      expected — leave it running unless you see an actual error."
 echo ""
 
 # "$@" (not a single joined string) so multi-word args survive intact.
-npx cdk deploy AgentCoreMcpStack "$@"
+# --all deploys EdgeWafStack first (AgentCoreMcpStack depends on its Web ACL).
+npx cdk deploy --all "$@"
 
 echo ""
 echo -e "${BLUE}============================================${NC}"
